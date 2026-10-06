@@ -14,7 +14,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](packaging/ctxbox.spec)
 
-<img src="docs/screenshots/main.png" width="860" alt="ctxbox 主界面">
+<img src="docs/screenshots/dashboard.png" width="860" alt="ctxbox 仪表盘">
 
 </div>
 

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-07
+
+### Added
+- **Dashboard home page**: welcome hero, stat cards (sessions / turns / tools /
+  snapshots), recent activity with one-click open, quick actions
+- **Keyboard shortcuts**: Ctrl+F search, Ctrl+R rescan, Ctrl+E export,
+  Ctrl+D clone, Delete remove — listed in Settings → 快捷键
+- Loading states: async session open with placeholder, scanning indicator
+  with progress bar, empty-search placeholder
+- Floating "back to bottom" button on long timelines
+- App window icon (dev + PyInstaller paths)
+- Kimi Code brand color/icon in the nav rail
+- SECURITY.md, ROADMAP.md; README hero (logo, badges, real screenshots)
+
+### Engineering
+- mypy is now **clean and blocking** for `core/` (19 errors fixed via `as_dict`)
+- Core coverage raised 80% → **89%**; CI runs pytest-cov and an offscreen
+  GUI smoke test (`scripts/gui_smoke.py`)
+
 ## [0.3.0] - 2026-10-06
 
 ### Added
