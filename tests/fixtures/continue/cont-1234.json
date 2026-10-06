@@ -1,0 +1,9 @@
+{
+  "session_id": "cont-1234",
+  "title": "Refactor the parser",
+  "date_created": "2026-07-01T10:00:00Z",
+  "history": [
+    {"message": {"role": "user", "content": "split parser.py into modules"}},
+    {"message": {"role": "assistant", "content": "Done: lexer.py, ast.py, driver.py"}}
+  ]
+}

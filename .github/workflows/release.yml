@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: ctxbox-windows-x64
+          - os: macos-latest
+            artifact: ctxbox-macos-universal
+          - os: ubuntu-latest
+            artifact: ctxbox-linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e ".[gui]" pyinstaller
+      - name: Build
+        run: pyinstaller packaging/ctxbox.spec --noconfirm
+      - name: Package archive
+        shell: bash
+        run: |
+          cd dist
+          tar -czf "${{ matrix.artifact }}.tar.gz" ctxbox
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create release
+        run: gh release create "${GITHUB_REF_NAME}" artifacts/*/*.tar.gz --generate-notes --title "ctxbox ${GITHUB_REF_NAME}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

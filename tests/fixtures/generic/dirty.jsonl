@@ -1,0 +1,5 @@
+{"role":"user","content":"hello from a dirty file"}
+{"role":"assistant","content":"hi there"
+{"broken line with no json at all
+{"role":"user","content":"trailing comma issue",},
+{"role":"assistant","content":"recovered or kept as raw"}

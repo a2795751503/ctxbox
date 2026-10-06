@@ -1,0 +1,21 @@
+name: Adapter request
+description: Request support for a new AI tool / 请求支持新的 AI 工具
+labels: [adapter-request]
+body:
+  - type: input
+    id: tool
+    attributes:
+      label: Tool name
+      placeholder: e.g. Zed AI, Trae, Auggie
+    validations:
+      required: true
+  - type: textarea
+    id: where
+    attributes:
+      label: Where does it store sessions?
+      description: File paths / formats if you know them (e.g. ~/.mytool/sessions/*.jsonl)
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample data
+      description: An ANONYMIZED snippet of the session file format. Remove all private content!
