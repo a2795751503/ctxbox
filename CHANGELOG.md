@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-06
+
+### Added
+- **Kimi Code adapter**: parses `wire.jsonl` event logs (user prompts,
+  thinking/text parts, tool calls/results, model info) — read + export
+- **OpenCode adapter**: read-only SQLite (`opencode.db`), many sessions per
+  DB via new `BaseAdapter.iter_sessions()` contract
+- **Gemini CLI adapter**: `~/.gemini/tmp/*/chats/session-*.json`, array and
+  checkpoint formats
+- **Aider adapter**: `.aider.chat.history.md` markdown logs
+- Index schema migration: primary key `(source_tool, source_path, id)`
+  supports multi-session files; one-time automatic rebuild
+
 ## [0.2.1] - 2026-10-06
 
 ### Fixed

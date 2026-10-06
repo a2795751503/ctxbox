@@ -25,8 +25,12 @@
 | Claude Code | ✅ | ✅ | JSONL sessions, uuid chain rebuilt |
 | Codex CLI / Desktop | ✅ | ✅ | rollout JSONL with `session_meta` |
 | Continue.dev | ✅ | ✅ | |
-| Generic JSONL (Kimi Code, OpenCode, …) | ✅ | ✅ | fallback adapter |
-| Cursor / Gemini CLI / Aider / Cline / Copilot / Windsurf | v0.2 | — | [planned](docs/adapters.md), adapter PRs welcome |
+| Kimi Code | ✅ | ⚠️ export | wire.jsonl event logs |
+| OpenCode | ✅ | ⚠️ export | opencode.db (SQLite, read-only) |
+| Gemini CLI | ✅ | ⚠️ export | |
+| Aider | ✅ | ⚠️ export | markdown history |
+| Generic JSONL (forks, hand-rolled tools…) | ✅ | ✅ | fallback adapter |
+| Cursor / Cline / Copilot / Windsurf | v0.4 | — | [planned](docs/adapters.md), adapter PRs welcome |
 
 Want your tool here? [Adding an adapter takes ~100 lines](CONTRIBUTING.md#adding-a-new-adapter). PRs welcome!
 想支持你的工具？[新增一个适配器只需约 100 行代码](CONTRIBUTING.md#adding-a-new-adapter)，欢迎 PR！

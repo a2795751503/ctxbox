@@ -45,7 +45,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at TEXT,
     updated_at TEXT,
     warnings TEXT,
-    PRIMARY KEY (source_tool, source_path)   -- one row per FILE; ids can repeat
+    PRIMARY KEY (source_tool, source_path, id)
+    -- one row per (file, conversation): codex splits a conversation into
+    -- snapshot files; opencode packs many conversations into one DB file
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
     session_key UNINDEXED, role, text, grams, tokenize='unicode61'
@@ -61,7 +63,21 @@ class SessionIndex:
         self.db.row_factory = sqlite3.Row
         self.db.executescript(_SCHEMA)
         self.db.execute("PRAGMA journal_mode=WAL")
+        self._migrate_schema()
         self._migrate_fts()
+
+    def _migrate_schema(self) -> None:
+        """v0.2.x -> v0.3.0: sessions PK gained `id` (multi-session files like
+        opencode's DB). Rebuild the index from scratch if the old PK is found."""
+        info = list(self.db.execute("PRAGMA table_info(sessions)"))
+        if info:
+            pk_cols = [r["name"] for r in info if r["pk"]]
+            if set(pk_cols) != {"source_tool", "source_path", "id"}:
+                self.db.execute("DROP TABLE sessions")
+                self.db.execute("DROP TABLE IF EXISTS turns_fts")
+                self.db.executescript(_SCHEMA)
+                self.db.commit()
+                self.rescan()  # full rebuild, one-time
 
     def _migrate_fts(self) -> None:
         """v0.1.0 -> v0.1.1: turns_fts gained a `grams` column. Rebuild FTS."""
@@ -113,12 +129,13 @@ class SessionIndex:
         ).fetchone()
         if row and row["source_mtime"] == mtime:
             return  # unchanged; incremental scan
-        session = get_adapter(tool).parse(path)
-        self.upsert_session(session)
+        adapter = get_adapter(tool)
+        for session in adapter.iter_sessions(path):  # one file may hold many
+            self.upsert_session(session)
 
     def upsert_session(self, session: Session) -> None:
-        # FTS key is per-FILE (ids repeat across snapshots of one conversation)
-        key = f"{session.source_tool}::{session.source_path}"
+        # FTS key carries the id too: one file may hold many conversations
+        key = f"{session.source_tool}::{session.id}::{session.source_path}"
         self.db.execute(
             """INSERT OR REPLACE INTO sessions
                (id, source_tool, title, project_dir, source_path, source_mtime,
@@ -231,7 +248,7 @@ class SessionIndex:
         ).fetchall()
         best: dict[tuple[str, str], dict[str, Any]] = {}
         for r in rows:
-            tool, _, path = r["session_key"].partition("::")
+            tool, sid, path = (r["session_key"].split("::", 2) + ["", ""])[:3]
             meta = self.db.execute(
                 "SELECT * FROM sessions WHERE source_path=? AND source_tool=?", (path, tool)
             ).fetchone()
@@ -254,7 +271,8 @@ class SessionIndex:
         ).fetchall()
         for r in rows:
             self.db.execute(
-                "DELETE FROM turns_fts WHERE session_key=?", (f"{tool}::{r['source_path']}",)
+                "DELETE FROM turns_fts WHERE session_key=?",
+                (f"{tool}::{session_id}::{r['source_path']}",),
             )
         self.db.execute("DELETE FROM sessions WHERE id=? AND source_tool=?", (session_id, tool))
         self.db.commit()

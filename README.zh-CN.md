@@ -21,8 +21,12 @@
 | Claude Code | ✅ | ✅ | JSONL 会话，自动重建 uuid 链 |
 | Codex CLI / Desktop | ✅ | ✅ | rollout JSONL，生成合法 session_meta 头 |
 | Continue.dev | ✅ | ✅ | |
-| 通用 JSONL（Kimi Code、OpenCode 等） | ✅ | ✅ | 兜底适配器 |
-| Cursor / Gemini CLI / Aider / Cline / Copilot / Windsurf | v0.2 | — | [计划中](docs/adapters.md)，欢迎适配器 PR |
+| Kimi Code | ✅ | ⚠️ 导出 | wire.jsonl 事件日志 |
+| OpenCode | ✅ | ⚠️ 导出 | opencode.db（SQLite，只读） |
+| Gemini CLI | ✅ | ⚠️ 导出 | |
+| Aider | ✅ | ⚠️ 导出 | markdown 历史 |
+| 通用 JSONL（各类 fork、自研工具） | ✅ | ✅ | 兜底适配器 |
+| Cursor / Cline / Copilot / Windsurf | v0.4 | — | [计划中](docs/adapters.md)，欢迎适配器 PR |
 
 想支持你的工具？[新增一个适配器只需约 100 行代码](CONTRIBUTING.md#adding-a-new-adapter)，欢迎 PR！
 

@@ -1,0 +1,5 @@
+[
+  {"id": "m1", "type": "user", "content": "explain what main.py does", "timestamp": "2026-08-01T10:00:00Z"},
+  {"id": "m2", "type": "gemini", "content": [{"text": "It starts the dev server."}], "timestamp": "2026-08-01T10:00:05Z"},
+  {"id": "m3", "type": "gemini", "content": "", "functionCalls": [{"name": "read_file", "args": {"path": "main.py"}}], "timestamp": "2026-08-01T10:00:06Z"}
+]

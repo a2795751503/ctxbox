@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import pkgutil
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from pathlib import Path
 from typing import ClassVar
 
@@ -33,6 +34,12 @@ class BaseAdapter(ABC):
     @abstractmethod
     def parse(self, path: Path) -> Session:
         """Native file -> unified Session model."""
+
+    def iter_sessions(self, path: Path) -> Iterator[Session]:
+        """Yield sessions found in path. Most tools store one session per
+        file (default below); DB-backed tools (opencode) override this to
+        yield many sessions from one database file."""
+        yield self.parse(path)
 
     @abstractmethod
     def serialize(self, session: Session) -> bytes:

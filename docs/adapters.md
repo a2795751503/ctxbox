@@ -5,18 +5,21 @@
 | `claude-code` | Claude Code | ✅ | ✅ | `~/.claude/projects/*/*.jsonl` |
 | `codex` | Codex CLI / Desktop | ✅ | ✅ | `~/.codex/sessions/**/rollout-*.jsonl`, `~/.codex/archived_sessions/` |
 | `continue` | Continue.dev | ✅ | ✅ | `~/.continue/sessions/*.json` |
+| `kimi-code` | Kimi Code | ✅ | ⚠️ export | `~/.kimi-code/sessions/*/session_*/agents/main/wire.jsonl` |
+| `opencode` | OpenCode | ✅ | ⚠️ export | `~/.local/share/opencode/opencode.db` (SQLite, read-only, multi-session) |
+| `gemini-cli` | Gemini CLI | ✅ | ⚠️ export | `~/.gemini/tmp/*/chats/session-*.json` |
+| `aider` | Aider | ✅ | ⚠️ export | `~/.aider.chat.history.md` |
 | `generic-jsonl` | any JSONL tool | ✅ | ✅ | user-selected files |
 
 ## Planned / 计划中 (contributions welcome!)
 
 | Tool | Status | Notes |
 |---|---|---|
-| Cursor | v0.2 | `state.vscdb` SQLite; encrypted fields degrade gracefully |
-| Gemini CLI | v0.2 | `~/.gemini/tmp/**/chats/*.json` |
-| Aider | v0.2 | `.aider.chat.history.md` |
-| Cline / RooCode | v0.2 | VS Code extension storage JSON |
-| GitHub Copilot | v0.3 | read-only, workspaceStorage |
-| Windsurf | v0.3 | |
+| Cursor | v0.4 | `state.vscdb` SQLite; encrypted fields degrade gracefully |
+| Cline / RooCode | v0.4 | VS Code extension storage JSON |
+| GitHub Copilot | v0.5 | read-only, workspaceStorage |
+| Windsurf | v0.5 | |
+| OpenCode legacy `storage/` JSON | — | pre-1.2 installs; SQLite is authoritative since 1.2 |
 
 ## Writing an adapter
 
