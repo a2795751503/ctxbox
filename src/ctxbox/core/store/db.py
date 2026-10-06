@@ -187,15 +187,23 @@ class SessionIndex:
     def sessions(self, tool: str | None = None, dedupe: bool = True) -> list[dict[str, Any]]:
         """List sessions. dedupe=True collapses per-id snapshots to the newest file."""
         if dedupe:
-            sql = """SELECT s.*, g.c AS snapshot_count FROM sessions s
-                     JOIN (SELECT source_tool, id, MAX(source_mtime) AS m, COUNT(*) AS c
-                           FROM sessions GROUP BY source_tool, id) g
-                     ON s.source_tool=g.source_tool AND s.id=g.id AND s.source_mtime=g.m"""
+            # window function: exactly one row per (tool, id) even on mtime ties
+            sql = """SELECT * FROM (
+                        SELECT s.*, g.c AS snapshot_count,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY s.source_tool, s.id
+                                   ORDER BY s.source_mtime DESC, s.source_path DESC
+                               ) AS rn
+                        FROM sessions s
+                        JOIN (SELECT source_tool, id, COUNT(*) AS c
+                              FROM sessions GROUP BY source_tool, id) g
+                        ON s.source_tool=g.source_tool AND s.id=g.id
+                     ) WHERE rn=1"""
         else:
             sql = "SELECT * FROM sessions"
         params: list[Any] = []
         if tool:
-            sql += " WHERE s.source_tool=?" if dedupe else " WHERE source_tool=?"
+            sql += " AND source_tool=?" if dedupe else " WHERE source_tool=?"
             params.append(tool)
         sql += " ORDER BY updated_at DESC"
         rows = self.db.execute(sql, params).fetchall()

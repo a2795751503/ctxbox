@@ -35,6 +35,9 @@ jobs:
         with:
           name: coverage-${{ matrix.os }}-${{ matrix.python }}
           path: coverage.xml
+      - name: GUI smoke dependencies (ubuntu)
+        if: matrix.python == '3.11' && runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libegl1 libgl1 libxkbcommon0
       - name: GUI smoke (offscreen)
         if: matrix.python == '3.11'
         env:
