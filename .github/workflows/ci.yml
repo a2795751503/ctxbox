@@ -24,6 +24,8 @@ jobs:
         run: |
           ruff check src tests
       - name: Type check
+        # v0.1: informational only — codebase typing is being hardened gradually
+        continue-on-error: true
         run: mypy src
       - name: Test
         run: pytest

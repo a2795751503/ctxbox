@@ -52,7 +52,6 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="ctxbox.app",
-        icon="../packaging/icons/ctxbox.icns",
         bundle_identifier="dev.ctxbox.app",
         info_plist={"NSHighResolutionCapable": "True"},
     )
