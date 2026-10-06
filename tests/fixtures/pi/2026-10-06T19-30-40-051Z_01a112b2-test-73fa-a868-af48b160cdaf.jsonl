@@ -1,0 +1,9 @@
+{"type":"session","version":3,"id":"01a112b2-test-73fa-a868-af48b160cdaf","timestamp":"2026-10-06T19:30:40.051Z","cwd":"C:\\proj\\demo"}
+{"type":"model_change","id":"d230e364","parentId":null,"timestamp":"2026-10-06T19:30:41.000Z","provider":"claude","modelId":"claude-opus-5-5"}
+{"type":"thinking_level_change","id":"0abb94c1","parentId":"d230e364","timestamp":"2026-10-06T19:30:41.000Z","thinkingLevel":"medium"}
+{"type":"message","id":"m1000001","parentId":"0abb94c1","timestamp":"2026-10-06T19:30:42.000Z","message":{"role":"system","content":"You are an expert coding assistant."}}
+{"type":"message","id":"m1000002","parentId":"m1000001","timestamp":"2026-10-06T19:30:45.000Z","message":{"role":"user","content":[{"type":"text","text":"怎么用pi切换上下文"}],"timestamp":1791314876308}}
+{"type":"message","id":"m1000003","parentId":"m1000002","timestamp":"2026-10-06T19:30:50.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"user asks about context switching"},{"type":"text","text":"用 /resume 选择历史会话即可。"}],"model":"gpt-6.1-sol","usage":{"input":5716,"output":14}}}
+{"type":"message","id":"m1000004","parentId":"m1000003","timestamp":"2026-10-06T19:30:55.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call_abc123","name":"read","arguments":{"path":"README.md"}}],"model":"gpt-6.1-sol"}}
+{"type":"message","id":"m1000005","parentId":"m1000004","timestamp":"2026-10-06T19:30:58.000Z","message":{"role":"toolResult","toolCallId":"call_abc123","toolName":"read","content":[{"type":"text","text":"# Pi README..."}]}}
+{"type":"context_edit","id":"e1000001","parentId":"m1000005","timestamp":"2026-10-06T19:31:00.000Z","targetId":"m1000005","replacement":null}

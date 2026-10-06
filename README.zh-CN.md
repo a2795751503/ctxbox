@@ -38,6 +38,7 @@
 | Codex CLI / Desktop | ✅ | ✅ | rollout JSONL，生成合法 session_meta 头 |
 | Continue.dev | ✅ | ✅ | |
 | Kimi Code | ✅ | ⚠️ 导出 | wire.jsonl 事件日志 |
+| Pi | ✅ | ✅ | sessions JSONL，应用 context_edit 修订 |
 | OpenCode | ✅ | ⚠️ 导出 | opencode.db（SQLite，只读） |
 | Gemini CLI | ✅ | ⚠️ 导出 | |
 | Aider | ✅ | ⚠️ 导出 | markdown 历史 |

@@ -192,7 +192,13 @@ class ClaudeCodeAdapter(BaseAdapter):
         ltype = "user" if turn.role in (Role.USER, Role.TOOL) else "assistant"
         content: list[dict[str, Any]] = []
         for p in turn.parts:
-            if p.raw and p.kind != "raw":
+            # reuse original block only if it came from a CLAUDE parse;
+            # cross-tool parts carry foreign blocks that must be converted
+            if (
+                p.raw
+                and p.kind != "raw"
+                and p.raw.get("type") in ("text", "thinking", "tool_use", "tool_result")
+            ):
                 content.append(p.raw)  # untouched part: round-trip original block
             elif p.kind == "text":
                 content.append({"type": "text", "text": p.text or ""})

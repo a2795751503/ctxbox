@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-07
+
+### Added
+- **Pi (pi.dev) adapter**: full read + inject. Parses session JSONL with
+  `context_edit` semantics (post-hoc message deletions applied), verified
+  against a live install; injection writes a brand-new session Pi picks up.
+  Verified both directions on real data: codex→pi and pi→codex (35/35 and
+  10/10 turns round-trip)
+
+### Fixed
+- Cross-tool raw round-trip: serializers now only reuse original blocks when
+  they came from the same tool's parser — foreign payloads are converted
+  instead of being dumped verbatim into the target format
+- Stable turn ids across save/re-parse (Claude uuid preservation) and GUI
+  auto-recovery from stale turn ids (0.5.1)
+
 ## [0.5.0] - 2026-10-07
 
 ### Added

@@ -43,6 +43,7 @@
 | Codex CLI / Desktop | ✅ | ✅ | rollout JSONL with `session_meta` |
 | Continue.dev | ✅ | ✅ | |
 | Kimi Code | ✅ | ⚠️ export | wire.jsonl event logs |
+| Pi | ✅ | ✅ | sessions JSONL, context_edit applied |
 | OpenCode | ✅ | ⚠️ export | opencode.db (SQLite, read-only) |
 | Gemini CLI | ✅ | ⚠️ export | |
 | Aider | ✅ | ⚠️ export | markdown history |

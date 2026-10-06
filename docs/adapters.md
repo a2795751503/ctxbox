@@ -6,6 +6,7 @@
 | `codex` | Codex CLI / Desktop | ✅ | ✅ | `~/.codex/sessions/**/rollout-*.jsonl`, `~/.codex/archived_sessions/` |
 | `continue` | Continue.dev | ✅ | ✅ | `~/.continue/sessions/*.json` |
 | `kimi-code` | Kimi Code | ✅ | ⚠️ export | `~/.kimi-code/sessions/*/session_*/agents/main/wire.jsonl` |
+| `pi` | Pi (pi.dev) | ✅ | ✅ | `~/.pi/agent/sessions/*/*.jsonl` |
 | `opencode` | OpenCode | ✅ | ⚠️ export | `~/.local/share/opencode/opencode.db` (SQLite, read-only, multi-session) |
 | `gemini-cli` | Gemini CLI | ✅ | ⚠️ export | `~/.gemini/tmp/*/chats/session-*.json` |
 | `aider` | Aider | ✅ | ⚠️ export | `~/.aider.chat.history.md` |
