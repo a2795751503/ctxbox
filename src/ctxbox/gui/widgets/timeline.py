@@ -7,7 +7,7 @@ kind="thinking" / "tool_call" / "tool_result" 默认折叠; kind="raw" 黄色警
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFrame,
@@ -225,6 +225,14 @@ class TimelineWidget(QListWidget):
             self.addItem(item)
             self.setItemWidget(item, row)
             bubble.doubleClicked.connect(lambda tid=turn.id: self.editRequested.emit(tid))
+            # 展开/收起折叠块(思考/工具/噪音)后, 重新测量并更新行高,
+            # 否则行高是创建时固定的, 内容会被压扁
+            for coll in bubble.findChildren(Collapsible):
+
+                def _relayout(_c: bool, it=item, rw=row) -> None:
+                    QTimer.singleShot(0, lambda: (rw.adjustSize(), it.setSizeHint(rw.sizeHint())))
+
+                coll.btn.toggled.connect(_relayout)
 
     def _on_context_menu(self, pos) -> None:
         item = self.itemAt(pos)
