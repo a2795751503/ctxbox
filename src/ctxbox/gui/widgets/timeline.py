@@ -141,7 +141,9 @@ class TurnBubble(QFrame):
             )
             self._text_color = t["bubble_assistant_text"]
             header_color = t["text_muted"]
-        self.setStyleSheet(f"TurnBubble {{ {style} }}")
+        # 气泡级兜底颜色: 即使某个子标签忘了设色, 也继承到与背景相配的前景色,
+        # 杜绝任何"白底白字/黑底黑字"组合
+        self.setStyleSheet(f"TurnBubble {{ {style} color: {self._text_color}; }}")
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 9, 14, 9)

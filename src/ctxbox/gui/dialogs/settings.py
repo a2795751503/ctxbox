@@ -22,7 +22,7 @@ from ctxbox.core.utils.paths import ctxbox_data_dir
 
 from ..theme import apply_theme, current_theme, tokens
 
-THEMES = [("light", "浅色"), ("dark", "深色")]
+THEMES = [("dark", "深色 (VSCode Dark+)"), ("light", "浅色 (VSCode Light+)")]
 
 
 class SettingsDialog(QDialog):
@@ -41,7 +41,7 @@ class SettingsDialog(QDialog):
         self.theme = QComboBox()
         for key, label in THEMES:
             self.theme.addItem(label, key)
-        self.theme.setCurrentIndex(0 if current_theme() == "light" else 1)
+        self.theme.setCurrentIndex(0 if current_theme() == "dark" else 1)
         self.theme.currentIndexChanged.connect(self._apply_theme)
         form.addRow("主题", self.theme)
 

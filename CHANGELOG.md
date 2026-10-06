@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-10-07
+
+### Changed
+- **Theme rebuilt on the VSCode IDE palette**: Dark+ (editor #1e1e1e, sidebar
+  #252526, button blue #0e639c) and Light+ (#ffffff / #f3f3f3 / #0078d4);
+  dark is now the default theme
+- Chat bubbles carry a bubble-level fallback text color — no unstyled label
+  can ever inherit a mismatched foreground again
+
+### Added
+- **WCAG contrast guard test**: every foreground/background token pair in both
+  themes is enforced ≥ 4.5 (3.0 for de-emphasized text) — the
+  "white-on-white" class of bugs is now impossible to reintroduce
+- Brand colors/icons for Pi, OpenCode, Gemini CLI, Aider
+
+### Fixed
+- Timeline readability bug reported as white text on white background
+
 ## [0.6.0] - 2026-10-07
 
 ### Added

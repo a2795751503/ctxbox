@@ -1,8 +1,9 @@
-"""设计令牌与全局主题 (cc-switch 风格)。
+"""设计令牌与全局主题 (VSCode IDE 配色)。
 
-集中定义 LIGHT/DARK 两套颜色令牌、间距、圆角、字体栈,
+集中定义 VSCode Light+ / Dark+ 两套颜色令牌、间距、圆角、字体栈,
 `apply_theme(app, theme)` 生成并应用全局 QSS。
-主题选择持久化在 QSettings("ctxbox", "ctxbox") key="theme", 默认 "light"。
+主题选择持久化在 QSettings("ctxbox", "ctxbox") key="theme", 默认 "dark"。
+所有前景/背景配对由 tests/test_theme_contrast.py 强制 WCAG 对比度 ≥ 4.5。
 """
 
 from __future__ import annotations
@@ -13,88 +14,91 @@ from PySide6.QtCore import QSettings
 FONT_FAMILY = '"Microsoft YaHei UI", "PingFang SC", "Segoe UI", sans-serif'
 MONO_FAMILY = '"Cascadia Code", Consolas, monospace'
 
-# ------------------------------------------------------------------ 令牌 --
+# ---------------------------------------------------- 令牌 (VSCode 配色) --
+# Light+ 参考 VSCode Light+: 编辑器 #ffffff / 侧栏 #f3f3f3 / 主蓝 #0078d4
 LIGHT: dict[str, str] = {
-    "bg": "#f5f6f8",
+    "bg": "#f3f3f3",
     "card": "#ffffff",
-    "border": "#e5e7eb",
-    "text": "#111827",
-    "text_secondary": "#6b7280",
-    "text_muted": "#9ca3af",
-    "accent": "#2563eb",
-    "accent_hover": "#1d4ed8",
-    "accent_soft": "#eff6ff",  # 选中态浅蓝底
-    "accent_soft_border": "#93c5fd",  # hover 边框蓝
-    "success": "#10b981",
-    "warning": "#f59e0b",
-    "danger": "#dc2626",
+    "border": "#e5e5e5",
+    "text": "#1f1f1f",
+    "text_secondary": "#424242",
+    "text_muted": "#6e6e6e",
+    "accent": "#0078d4",
+    "accent_hover": "#106ebe",
+    "accent_soft": "#e8f1fb",  # 选中态浅蓝底
+    "accent_soft_border": "#7eb6ea",  # hover 边框蓝
+    "success": "#16825d",
+    "warning": "#bf8803",
+    "danger": "#c72e0f",
     "input_bg": "#ffffff",
-    "input_border": "#d1d5db",
+    "input_border": "#cecece",
     "menu_bg": "#ffffff",
-    "scroll_handle": "rgba(17, 24, 39, 0.25)",
-    "scroll_handle_hover": "rgba(17, 24, 39, 0.40)",
+    "scroll_handle": "rgba(31, 31, 31, 0.25)",
+    "scroll_handle_hover": "rgba(31, 31, 31, 0.45)",
     # 时间线气泡
-    "bubble_user_bg": "#2563eb",
+    "bubble_user_bg": "#005a9e",
     "bubble_user_text": "#ffffff",
-    "bubble_user_header": "#dbeafe",
+    "bubble_user_header": "#cfe4f7",
     "bubble_assistant_bg": "#ffffff",
-    "bubble_assistant_border": "#e5e7eb",
-    "bubble_assistant_text": "#111827",
-    "bubble_tool_bg": "#f3f4f6",
-    "bubble_tool_border": "#d1d5db",
-    "bubble_tool_text": "#4b5563",
-    "code_bg": "#f3f4f6",
-    "code_border": "#e5e7eb",
-    "code_text": "#1f2937",
-    "noise_bg": "#fffbeb",
-    "noise_border": "#fbbf24",
-    "raw_bg": "#fef3c7",
-    "raw_border": "#fcd34d",
-    "raw_text": "#92400e",
-    "snippet": "#b45309",
+    "bubble_assistant_border": "#e5e5e5",
+    "bubble_assistant_text": "#1f1f1f",
+    "bubble_tool_bg": "#f3f3f3",
+    "bubble_tool_border": "#cecece",
+    "bubble_tool_text": "#383838",
+    "code_bg": "#f5f5f5",
+    "code_border": "#e0e0e0",
+    "code_text": "#1f1f1f",
+    "noise_bg": "#fff8e5",
+    "noise_border": "#d7a900",
+    "raw_bg": "#fff3d6",
+    "raw_border": "#d7a900",
+    "raw_text": "#6b4e00",
+    "snippet": "#8a5a00",
 }
 
+# Dark+ 参考 VSCode Dark+: 编辑器 #1e1e1e / 侧栏 #252526 / 按钮蓝 #0e639c
 DARK: dict[str, str] = {
-    "bg": "#0f1115",
-    "card": "#1a1d24",
-    "border": "#2d333d",
-    "text": "#e5e7eb",
-    "text_secondary": "#9ca3af",
-    "text_muted": "#6b7280",
-    "accent": "#3b82f6",
-    "accent_hover": "#2563eb",
-    "accent_soft": "#1e293b",
-    "accent_soft_border": "#2563eb",
-    "success": "#10b981",
-    "warning": "#f59e0b",
-    "danger": "#ef4444",
-    "input_bg": "#11141a",
-    "input_border": "#374151",
-    "menu_bg": "#1a1d24",
-    "scroll_handle": "rgba(255, 255, 255, 0.20)",
-    "scroll_handle_hover": "rgba(255, 255, 255, 0.35)",
+    "bg": "#1e1e1e",
+    "card": "#252526",
+    "border": "#3c3c3c",
+    "text": "#cccccc",
+    "text_secondary": "#a6a6a6",
+    "text_muted": "#8a8a8a",
+    "accent": "#0e639c",
+    "accent_hover": "#1177bb",
+    "accent_soft": "#094771",  # 列表选中底
+    "accent_soft_border": "#1177bb",
+    "success": "#4ec9b0",
+    "warning": "#dcdcaa",
+    "danger": "#f48771",
+    "input_bg": "#3c3c3c",
+    "input_border": "#3c3c3c",
+    "menu_bg": "#252526",
+    "scroll_handle": "rgba(204, 204, 204, 0.20)",
+    "scroll_handle_hover": "rgba(204, 204, 204, 0.40)",
     # 时间线气泡
-    "bubble_user_bg": "#1d4ed8",
+    "bubble_user_bg": "#0e639c",
     "bubble_user_text": "#ffffff",
-    "bubble_user_header": "#bfdbfe",
-    "bubble_assistant_bg": "#1f2937",
-    "bubble_assistant_border": "#374151",
-    "bubble_assistant_text": "#e5e7eb",
-    "bubble_tool_bg": "#111827",
-    "bubble_tool_border": "#374151",
-    "bubble_tool_text": "#9ca3af",
-    "code_bg": "#111827",
-    "code_border": "#374151",
-    "code_text": "#d1d5db",
-    "noise_bg": "#2c2614",
-    "noise_border": "#a16207",
-    "raw_bg": "#2c2614",
-    "raw_border": "#a16207",
-    "raw_text": "#fbbf24",
-    "snippet": "#fbbf24",
+    "bubble_user_header": "#9fd0f0",
+    "bubble_assistant_bg": "#252526",
+    "bubble_assistant_border": "#3c3c3c",
+    "bubble_assistant_text": "#cccccc",
+    "bubble_tool_bg": "#1b1b1c",
+    "bubble_tool_border": "#3c3c3c",
+    "bubble_tool_text": "#a6a6a6",
+    "code_bg": "#1b1b1c",
+    "code_border": "#3c3c3c",
+    "code_text": "#d4d4d4",
+    "noise_bg": "#2e2a17",
+    "noise_border": "#8a7b1e",
+    "raw_bg": "#2e2a17",
+    "raw_border": "#8a7b1e",
+    "raw_text": "#dcdcaa",
+    "snippet": "#d7b54a",
 }
 
 THEMES = {"light": LIGHT, "dark": DARK}
+DEFAULT_THEME = "dark"
 
 # 工具品牌色 (pill 徽章)
 TOOL_COLORS = {
@@ -102,6 +106,10 @@ TOOL_COLORS = {
     "codex": "#10b981",  # 绿
     "continue": "#6366f1",  # 紫
     "kimi-code": "#0ea5e9",  # 天蓝
+    "pi": "#7c3aed",  # 紫罗兰
+    "opencode": "#f97316",  # 橙
+    "gemini-cli": "#4285f4",  # 谷歌蓝
+    "aider": "#84cc16",  # 黄绿
     "generic-jsonl": "#6b7280",  # 灰
 }
 TOOL_ICONS = {
@@ -109,6 +117,10 @@ TOOL_ICONS = {
     "codex": "🌀",
     "continue": "🧩",
     "kimi-code": "🌙",
+    "pi": "🥧",
+    "opencode": "🈳",
+    "gemini-cli": "♊",
+    "aider": "🛠",
     "generic-jsonl": "📄",
 }
 
@@ -118,8 +130,8 @@ SPACING_CARD = 8
 
 # ---------------------------------------------------------------- 持久化 --
 def current_theme() -> str:
-    name = str(QSettings("ctxbox", "ctxbox").value("theme", "light"))
-    return name if name in THEMES else "light"
+    name = str(QSettings("ctxbox", "ctxbox").value("theme", DEFAULT_THEME))
+    return name if name in THEMES else DEFAULT_THEME
 
 
 def set_theme(name: str) -> None:
@@ -230,7 +242,7 @@ def apply_theme(app, theme: str) -> None:
     from PySide6.QtWidgets import QStyleFactory
 
     if theme not in THEMES:
-        theme = "light"
+        theme = DEFAULT_THEME
     t = THEMES[theme]
     app.setStyle(QStyleFactory.create("Fusion"))
     p = QPalette()
