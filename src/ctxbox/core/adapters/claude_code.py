@@ -183,7 +183,12 @@ class ClaudeCodeAdapter(BaseAdapter):
     def _turn_to_line(
         self, turn: Turn, session_id: str, parent_uuid: str | None, cwd: str | None
     ) -> dict[str, Any]:
-        new_uuid = str(uuidlib.uuid4())
+        # preserve the turn's uuid when valid: turn ids stay stable across
+        # save/re-parse round-trips (the GUI relies on this for turn actions)
+        try:
+            new_uuid = str(uuidlib.UUID(turn.id))
+        except (ValueError, AttributeError):
+            new_uuid = str(uuidlib.uuid4())
         ltype = "user" if turn.role in (Role.USER, Role.TOOL) else "assistant"
         content: list[dict[str, Any]] = []
         for p in turn.parts:

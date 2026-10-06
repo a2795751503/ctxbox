@@ -701,7 +701,13 @@ class MainWindow(QMainWindow):
         for i, t in enumerate(s.turns):
             if t.id == turn_id:
                 return i
-        raise KeyError(f"找不到轮次 {turn_id}")
+        # 保存后适配器可能重建 id: 界面持有的是旧 id — 从磁盘重载一次再试
+        self._load_and_render(s.id)
+        s = self.current_session
+        for i, t in enumerate(s.turns):
+            if t.id == turn_id:
+                return i
+        raise KeyError(f"找不到轮次 {turn_id}(界面已自动刷新, 请重试该操作)")
 
     def _edit_turn(self, turn_id: str) -> None:
         s = self.current_session

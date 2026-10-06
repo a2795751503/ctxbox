@@ -1,4 +1,5 @@
 """Atomic file writes and backup helpers. We never half-write a user's file."""
+
 from __future__ import annotations
 
 import contextlib
