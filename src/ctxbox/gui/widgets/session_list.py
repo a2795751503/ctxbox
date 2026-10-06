@@ -45,9 +45,16 @@ class SessionCard(QFrame):
         title.setStyleSheet("font-weight: 600; font-size: 13px;")
         title.setWordWrap(False)
 
-        meta = QLabel(
+        meta_bits = [
             f"{display_name} · {row.get('turn_count', '?')} 轮 · {fmt_dt(row.get('updated_at'))}"
-        )
+        ]
+        snapshots = row.get("snapshot_count") or 1
+        if snapshots > 1:
+            meta_bits.append(f"📷 {snapshots} 个快照")
+        hits = row.get("hit_count") or 0
+        if hits > 1:
+            meta_bits.append(f"🔍 {hits} 处命中")
+        meta = QLabel(" · ".join(meta_bits))
         meta.setStyleSheet("color: #9aa0aa; font-size: 12px;")
 
         proj = QLabel(row.get("project_dir") or row.get("source_path") or "")

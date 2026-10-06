@@ -126,9 +126,22 @@ class TurnBubble(QFrame):
             header_bits.append(f"tokens {turn.tokens_in or 0}/{turn.tokens_out or 0}")
         if turn.meta.get("_edited"):
             header_bits.append("✎已编辑")
+        if turn.meta.get("noise"):
+            header_bits.append("⚙️环境/系统上下文")
         header = QLabel(" · ".join(header_bits))
         header.setStyleSheet("color: #9aa0aa; font-size: 11px;")
         lay.addWidget(header)
+
+        if turn.meta.get("noise"):
+            # 噪音轮(工具注入的环境/系统上下文)默认整体折叠, 不再淹没时间线
+            inner = QFrame()
+            inner_lay = QVBoxLayout(inner)
+            inner_lay.setContentsMargins(0, 0, 0, 0)
+            for part in turn.parts:
+                inner_lay.addWidget(self._render_part(part))
+            preview = (turn.text() or "").strip().splitlines()[0][:60] if turn.text() else ""
+            lay.addWidget(Collapsible(f"⚙️ 环境/系统上下文 · {preview}…", inner))
+            return
 
         for part in turn.parts:
             lay.addWidget(self._render_part(part))

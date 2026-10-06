@@ -21,6 +21,27 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Turn texts starting with these are tool-injected context, not human input.
+# (verified against real Codex / Claude Code sessions)
+NOISE_PREFIXES = (
+    "<environment_context",
+    "<app-context",
+    "<system-reminder",
+    "<collaboration_mode",
+    "<codex_internal_context",
+    "<in-app-browser-context",
+    "<user_instructions",
+    "<permissions instructions",
+    "# Files mentioned by the user",
+)
+
+
+def is_noise_text(text: str) -> bool:
+    """True if the text is tool-injected environment/system context, not a
+    real human message. Used for smart titles and default folding."""
+    t = text.strip()
+    return any(t.startswith(p) for p in NOISE_PREFIXES)
+
 
 class Role(str, Enum):
     SYSTEM = "system"
@@ -105,14 +126,23 @@ class Session(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
     def model_post_init(self, __context: Any, /) -> None:
+        # mark noise turns (tool-injected env/system context, not human input)
+        for t in self.turns:
+            if t.role == Role.SYSTEM or is_noise_text(t.text()):
+                t.meta.setdefault("noise", True)
         if not self.title:
+            # smart title: first real human message, skipping injected context
             for t in self.turns:
-                if t.role == Role.USER and t.text().strip():
+                if t.role == Role.USER and not t.meta.get("noise") and t.text().strip():
                     self.title = t.text().strip().splitlines()[0][:60]
                     break
         for i, t in enumerate(self.turns):
             if not t.id:
                 t.id = Turn.make_id(self.id, i)
+
+    @property
+    def noise_count(self) -> int:
+        return sum(1 for t in self.turns if t.meta.get("noise"))
 
     # ---- CRUD helpers (GUI/CLI operate through these) ----
     def get_turn(self, turn_id: str) -> Turn | None:

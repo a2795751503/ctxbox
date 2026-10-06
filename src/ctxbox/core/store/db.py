@@ -20,9 +20,9 @@ from ..utils import ctxbox_data_dir, make_backup
 _CJK = re.compile(r"[一-鿿぀-ヿ가-힯]+")
 
 
-def _cjk_bigrams(text: str) -> str:
-    """FTS5's unicode61 treats a whole CJK run as ONE token, so searching
-    '补天' never matches '补天白帽'. Fix: index/search overlapping bigrams."""
+def _bigrams(text: str) -> str:
+    """Overlapping CJK bigrams — FTS5's unicode61 treats a whole CJK run as
+    ONE token, so searching '补天' would never match '补天白帽' without this."""
     grams: list[str] = []
     for m in _CJK.finditer(text):
         run = m.group(0)
@@ -30,7 +30,7 @@ def _cjk_bigrams(text: str) -> str:
             grams.append(run)
         else:
             grams.extend(run[i : i + 2] for i in range(len(run) - 1))
-    return text + " " + " ".join(grams) if grams else text
+    return " ".join(grams)
 
 
 _SCHEMA = """
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     PRIMARY KEY (source_tool, source_path)   -- one row per FILE; ids can repeat
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
-    session_key UNINDEXED, role, text, tokenize='unicode61'
+    session_key UNINDEXED, role, text, grams, tokenize='unicode61'
 );
 """
 
@@ -61,6 +61,25 @@ class SessionIndex:
         self.db.row_factory = sqlite3.Row
         self.db.executescript(_SCHEMA)
         self.db.execute("PRAGMA journal_mode=WAL")
+        self._migrate_fts()
+
+    def _migrate_fts(self) -> None:
+        """v0.1.0 -> v0.1.1: turns_fts gained a `grams` column. Rebuild FTS."""
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(turns_fts)")}
+        if cols and "grams" not in cols:
+            self.db.execute("DROP TABLE turns_fts")
+            self.db.execute(
+                "CREATE VIRTUAL TABLE turns_fts USING fts5("
+                "session_key UNINDEXED, role, text, grams, tokenize='unicode61')"
+            )
+            rows = self.db.execute("SELECT source_tool, source_path FROM sessions").fetchall()
+            for r in rows:
+                try:
+                    session = get_adapter(r["source_tool"]).parse(Path(r["source_path"]))
+                    self.upsert_session(session)  # force: repopulate FTS
+                except Exception:
+                    continue  # file may be gone; next scan cleans up
+            self.db.commit()
 
     def close(self) -> None:
         self.db.close()
@@ -122,9 +141,9 @@ class SessionIndex:
         )
         self.db.execute("DELETE FROM turns_fts WHERE session_key=?", (key,))
         self.db.executemany(
-            "INSERT INTO turns_fts (session_key, role, text) VALUES (?,?,?)",
+            "INSERT INTO turns_fts (session_key, role, text, grams) VALUES (?,?,?,?)",
             [
-                (key, t.role.value, _cjk_bigrams(t.text()))
+                (key, t.role.value, t.text(), _bigrams(t.text()))
                 for t in session.turns
                 if t.text().strip()
             ],
@@ -151,8 +170,8 @@ class SessionIndex:
     def sessions(self, tool: str | None = None, dedupe: bool = True) -> list[dict[str, Any]]:
         """List sessions. dedupe=True collapses per-id snapshots to the newest file."""
         if dedupe:
-            sql = """SELECT s.* FROM sessions s
-                     JOIN (SELECT source_tool, id, MAX(source_mtime) AS m
+            sql = """SELECT s.*, g.c AS snapshot_count FROM sessions s
+                     JOIN (SELECT source_tool, id, MAX(source_mtime) AS m, COUNT(*) AS c
                            FROM sessions GROUP BY source_tool, id) g
                      ON s.source_tool=g.source_tool AND s.id=g.id AND s.source_mtime=g.m"""
         else:
@@ -192,30 +211,41 @@ class SessionIndex:
         return get_adapter(row["source_tool"]).parse(path)
 
     def search(self, query: str, limit: int = 50) -> list[dict[str, Any]]:
-        """FTS5 full-text search. Returns sessions with a matching snippet.
-        CJK queries are expanded to bigram tokens (AND semantics)."""
+        """FTS5 full-text search, deduplicated per conversation.
+
+        - CJK queries expand to quoted bigrams matched against the `grams`
+          column (clean `text` column stays bigram-free for snippets)
+        - one row per conversation: best snippet + total hit count
+        """
         q = query.strip()
         if _CJK.search(q):
-            grams = _cjk_bigrams(q).split()
-            grams = [g for g in grams if _CJK.search(g)]  # keep only bigram tokens
+            grams = [g for g in _bigrams(q).split() if _CJK.search(g)]
             if grams:
-                q = " ".join(f'"{g}"' for g in grams)
+                q = " OR ".join(f'"{g}"' for g in grams)
+                q = f"grams:({q})"
+        # over-fetch, then dedupe per conversation
         rows = self.db.execute(
             """SELECT session_key, role, snippet(turns_fts, 2, '[', ']', '…', 12) AS snip
                FROM turns_fts WHERE turns_fts MATCH ? ORDER BY rank LIMIT ?""",
-            (q, limit),
+            (q, limit * 4),
         ).fetchall()
-        out = []
+        best: dict[tuple[str, str], dict[str, Any]] = {}
         for r in rows:
             tool, _, path = r["session_key"].partition("::")
             meta = self.db.execute(
                 "SELECT * FROM sessions WHERE source_path=? AND source_tool=?", (path, tool)
             ).fetchone()
-            if meta:
+            if not meta:
+                continue
+            conv = (tool, meta["id"])
+            if conv not in best:
                 d = dict(meta)
                 d["snippet"] = r["snip"]
-                out.append(d)
-        return out
+                d["hit_count"] = 1
+                best[conv] = d
+            else:
+                best[conv]["hit_count"] += 1
+        return list(best.values())[:limit]
 
     def remove_session(self, session_id: str, tool: str) -> None:
         """Remove from index only (all snapshots) — source files are never deleted."""

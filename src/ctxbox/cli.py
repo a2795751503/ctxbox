@@ -63,7 +63,9 @@ def cmd_show(args: argparse.Namespace) -> int:
 def cmd_search(args: argparse.Namespace) -> int:
     idx = SessionIndex()
     for r in idx.search(args.query):
-        print(f"{r['source_tool']:<14} {r['id'][:38]:<38} {r['title'] or ''}")
+        hits = f" ({r['hit_count']} hits)" if r.get("hit_count", 1) > 1 else ""
+        snaps = f" [📷 {r['snapshot_count']} snapshots]" if r.get("snapshot_count", 1) > 1 else ""
+        print(f"{r['source_tool']:<14} {r['id'][:38]:<38} {r['title'] or ''}{hits}{snaps}")
         print(f"    …{r['snippet']}…")
     idx.close()
     return 0
@@ -72,7 +74,9 @@ def cmd_search(args: argparse.Namespace) -> int:
 def cmd_export(args: argparse.Namespace) -> int:
     idx = SessionIndex()
     session = idx.load_session(args.id, tool=args.tool)
-    text = export_session(session, fmt=args.format, redact=args.redact)
+    text = export_session(
+        session, fmt=args.format, redact=args.redact, include_system=args.include_system
+    )
     if args.output:
         Path(args.output).write_text(text, encoding="utf-8")
         print(f"Exported -> {args.output}")
@@ -140,6 +144,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--tool")
     s.add_argument("--format", default="md", choices=["md", "json", "jsonl"])
     s.add_argument("--redact", action="store_true", help="scrub secrets/emails")
+    s.add_argument(
+        "--include-system",
+        action="store_true",
+        help="keep system/environment turns (skipped by default)",
+    )
     s.add_argument("-o", "--output")
     s.set_defaults(func=cmd_export)
 
