@@ -1,6 +1,23 @@
+<div align="center">
+
+<img src="docs/assets/logo.png" width="96" alt="ctxbox logo">
+
 # ctxbox
 
+**One place for all your AI coding assistant contexts**
+**一站式管理你电脑上所有 AI 编程助手的上下文**
+
 [English](README.md) | [中文](README.zh-CN.md)
+
+[![CI](https://github.com/a2795751503/ctxbox/actions/workflows/ci.yml/badge.svg)](https://github.com/a2795751503/ctxbox/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/a2795751503/ctxbox)](https://github.com/a2795751503/ctxbox/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](packaging/ctxbox.spec)
+
+<img src="docs/screenshots/main.png" width="860" alt="ctxbox main window">
+
+</div>
 
 > **EN** — One place for all your AI coding assistant contexts. Scan, search, edit, copy, and inject conversation history across Claude Code, Codex, Cursor, Continue, Gemini CLI, Aider and more — 100% local, open source, MIT licensed.
 >
@@ -35,8 +52,14 @@
 Want your tool here? [Adding an adapter takes ~100 lines](CONTRIBUTING.md#adding-a-new-adapter). PRs welcome!
 想支持你的工具？[新增一个适配器只需约 100 行代码](CONTRIBUTING.md#adding-a-new-adapter)，欢迎 PR！
 
-## Install / 安装
+## Screenshots / 界面
 
+<p align="center">
+<img src="docs/screenshots/timeline.png" width="860" alt="conversation timeline">
+<br><em>对话时间线 — 蓝色为用户输入，白色为助手输出，黄色为折叠的环境上下文<br>Timeline — blue = user input, white = assistant output, amber = folded environment context</em>
+</p>
+
+## Install / 安装
 Download the latest build for your OS from [Releases](../../releases), or run from source:
 从 [Releases](../../releases) 下载对应平台的安装包，或从源码运行：
 

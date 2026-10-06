@@ -1,6 +1,22 @@
+<div align="center">
+
+<img src="docs/assets/logo.png" width="96" alt="ctxbox logo">
+
 # ctxbox
 
+**一站式管理你电脑上所有 AI 编程助手的上下文**
+
 [English](README.md) | [中文](README.zh-CN.md)
+
+[![CI](https://github.com/a2795751503/ctxbox/actions/workflows/ci.yml/badge.svg)](https://github.com/a2795751503/ctxbox/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/a2795751503/ctxbox)](https://github.com/a2795751503/ctxbox/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](packaging/ctxbox.spec)
+
+<img src="docs/screenshots/main.png" width="860" alt="ctxbox 主界面">
+
+</div>
 
 > 一站式管理你电脑上所有 AI 编程助手的上下文。自动扫描、搜索、编辑、复制、注入 Claude Code、Codex、Cursor、Continue、Gemini CLI、Aider 等工具的对话记录 —— 100% 本地运行，开源，MIT 协议。
 
