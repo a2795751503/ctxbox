@@ -460,6 +460,8 @@ class MainWindow(QMainWindow):
                 self._clone_session(session_id)
             elif action == "delete":
                 self._delete_session(session_id)
+            elif action == "delete_file":
+                self._delete_context_file(session_id)
             elif action == "export_md":
                 self._export_session(session_id, md_only=True)
             elif action == "inject":
@@ -571,6 +573,56 @@ class MainWindow(QMainWindow):
             self.current_session = None
             self.right_stack.setCurrentWidget(self.dashboard)
         self.statusBar().showMessage("已从索引删除 (源文件保留)", 5000)
+        self.refresh()
+
+    def _delete_context_file(self, session_id: str) -> None:
+        """删除上下文: 连源文件一起删——但先把每个文件备份进 ctxbox 回收站
+        (~/.ctxbox/backups 或平台数据目录), 可恢复, 符合'绝不丢数据'铁律。"""
+        row = next((r for r in self._all_rows if r["id"] == session_id), None)
+        if row is None:
+            return
+        title = row.get("title") or session_id
+        tool = row.get("source_tool")
+        idx = self._require_idx()
+        # 该会话在索引里的全部快照文件
+        files = [
+            r["source_path"]
+            for r in idx.sessions(dedupe=False)
+            if r["id"] == session_id and r["source_tool"] == tool and r.get("source_path")
+        ]
+        snapshots = len(files)
+        box = QMessageBox(self)
+        box.setWindowTitle("删除上下文")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(
+            f"确定删除「{title}」的上下文文件吗?\n\n"
+            f"将删除 {snapshots} 个源文件(含全部快照)。\n"
+            "删除前会自动备份到 ctxbox 回收站, 需要时可从备份目录恢复。"
+        )
+        box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        if box.exec() != QMessageBox.StandardButton.Yes:
+            return
+        from pathlib import Path
+
+        deleted, backup_dir = 0, None
+        for f in files:
+            p = Path(f)
+            if not p.exists():
+                continue
+            backup = idx.backup_file(p)
+            backup_dir = backup.parent
+            try:
+                p.unlink()
+                deleted += 1
+            except OSError as exc:
+                self._error("删除失败", f"{p}\n{exc}\n(文件可能被对应工具占用, 请先关闭)")
+                return
+        idx.remove_session(session_id, tool)
+        if self.current_session and self.current_session.id == session_id:
+            self.current_session = None
+            self.right_stack.setCurrentWidget(self.dashboard)
+        self.statusBar().showMessage(f"已删除 {deleted} 个上下文文件 · 备份在 {backup_dir}", 8000)
         self.refresh()
 
     def _export_session(self, session_id: str, md_only: bool = False) -> None:

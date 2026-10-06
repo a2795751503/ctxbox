@@ -214,6 +214,7 @@ class SessionListWidget(QListWidget):
             ("copy", "复制全文"),
             ("clone", "克隆会话"),
             ("delete", "删除会话 (仅删索引)"),
+            ("delete_file", "🗑 删除上下文 (含源文件, 可恢复)"),
             ("export_md", "导出 Markdown"),
             ("inject", "注入到…"),
             ("surgery", "🩺 上下文手术室…"),
