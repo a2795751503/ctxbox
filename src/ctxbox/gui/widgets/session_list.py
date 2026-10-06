@@ -161,6 +161,8 @@ class SessionListWidget(QListWidget):
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
         self.itemDoubleClicked.connect(self._on_double_clicked)
+        # ↑/↓ 方向键移动 currentItem 时同步卡片选中样式
+        self.currentItemChanged.connect(lambda _cur, _prev: self._restyle_selection())
         self._tool_display: dict[str, str] = {}
 
     def set_tool_display_names(self, mapping: dict[str, str]) -> None:
@@ -180,10 +182,14 @@ class SessionListWidget(QListWidget):
 
     def _select_item(self, item: QListWidgetItem) -> None:
         self.setCurrentItem(item)
+        self._restyle_selection()
+
+    def _restyle_selection(self) -> None:
+        cur = self.currentItem()
         for i in range(self.count()):
             w = self.itemWidget(self.item(i))
             if isinstance(w, SessionCard):
-                w.set_selected(self.item(i) is item)
+                w.set_selected(self.item(i) is cur)
 
     def _on_double_clicked(self, item: QListWidgetItem) -> None:
         row = item.data(Qt.ItemDataRole.UserRole)

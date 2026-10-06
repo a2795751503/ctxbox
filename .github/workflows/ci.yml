@@ -23,9 +23,20 @@ jobs:
       - name: Lint
         run: |
           ruff check src tests
-      - name: Type check
-        # v0.1: informational only — codebase typing is being hardened gradually
+      - name: Type check (core — blocking)
+        run: mypy src/ctxbox/core
+      - name: Type check (gui — informational)
         continue-on-error: true
-        run: mypy src
-      - name: Test
-        run: pytest
+        run: mypy src/ctxbox/gui
+      - name: Test (with coverage)
+        run: pytest --cov=ctxbox.core --cov-report=term --cov-report=xml
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}-${{ matrix.python }}
+          path: coverage.xml
+      - name: GUI smoke (offscreen)
+        if: matrix.python == '3.11'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python scripts/gui_smoke.py

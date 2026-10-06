@@ -7,7 +7,8 @@ import traceback
 import uuid
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSplitter,
     QStackedWidget,
@@ -37,6 +39,7 @@ from ._compat import SessionIndex, export_session
 from .dialogs.inject_wizard import InjectWizard
 from .dialogs.settings import SettingsDialog
 from .theme import TOOL_ICONS
+from .widgets.dashboard import DashboardWidget
 from .widgets.nav_rail import NavRail
 from .widgets.session_list import SessionListWidget
 from .widgets.timeline import TimelineWidget
@@ -150,6 +153,7 @@ class MainWindow(QMainWindow):
         self.search_edit = QLineEdit()
         self.search_edit.setObjectName("capsuleSearch")
         self.search_edit.setPlaceholderText("🔍 全局搜索 (回车搜索, 清空恢复)…")
+        self.search_edit.setToolTip("全文搜索所有会话内容 (Ctrl+F)")
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.returnPressed.connect(self._on_search)
         self.search_edit.textChanged.connect(self._on_search_text_changed)
@@ -157,16 +161,19 @@ class MainWindow(QMainWindow):
 
         self.btn_scan = QPushButton("🔄 扫描")
         self.btn_scan.setProperty("kind", "secondary")
+        self.btn_scan.setToolTip("重新扫描本机所有 AI 工具的会话 (Ctrl+R)")
         self.btn_scan.clicked.connect(self.start_scan)
         hb.addWidget(self.btn_scan)
 
         btn_export = QPushButton("📤 导出")
         btn_export.setProperty("kind", "secondary")
+        btn_export.setToolTip("导出当前会话为 Markdown / JSON / JSONL (Ctrl+E)")
         btn_export.clicked.connect(self._on_export_current)
         hb.addWidget(btn_export)
 
         btn_inject = QPushButton("💉 注入")
         btn_inject.setProperty("kind", "primary")
+        btn_inject.setToolTip("把当前会话注入到另一个 AI 工具")
         btn_inject.clicked.connect(self._on_inject_current)
         hb.addWidget(btn_inject)
         root.addWidget(header)
@@ -195,12 +202,18 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.center_stack)
 
         self.right_stack = QStackedWidget()
-        self.right_empty = self._make_empty("👈", "在中间栏选择一个会话\n这里显示对话时间线。")
+        self.dashboard = DashboardWidget()
+        self.dashboard.openRequested.connect(self.open_session)
+        self.dashboard.scanRequested.connect(self.start_scan)
+        self.dashboard.searchRequested.connect(self.focus_search)
+        self.right_loading = self._make_empty("⏳", "加载中…")
         self.timeline = TimelineWidget()
         self.timeline.editRequested.connect(self._edit_turn)
         self.timeline.contextAction.connect(self._on_turn_action)
-        self.right_stack.addWidget(self.right_empty)
+        self.right_stack.addWidget(self.dashboard)
+        self.right_stack.addWidget(self.right_loading)
         self.right_stack.addWidget(self.timeline)
+        self.right_stack.setCurrentWidget(self.dashboard)
         splitter.addWidget(self.right_stack)
 
         splitter.setStretchFactor(0, 2)
@@ -210,11 +223,36 @@ class MainWindow(QMainWindow):
         root.addLayout(body, 1)
         self.setCentralWidget(central)
 
-        # 状态栏: 右侧灰色小字 = 总数 + 索引路径
+        # 状态栏: 右侧灰色小字 = 总数 + 索引路径; 扫描时加不确定进度条
+        self.scan_progress = QProgressBar()
+        self.scan_progress.setRange(0, 0)  # indeterminate
+        self.scan_progress.setFixedWidth(140)
+        self.scan_progress.setTextVisible(False)
+        self.scan_progress.hide()
+        self.statusBar().addPermanentWidget(self.scan_progress)
         db_path = ctxbox_data_dir() / "index.db"
         self.status_total = QLabel(f"共 0 个会话 · 索引: {db_path}")
         self.statusBar().addPermanentWidget(self.status_total)
         self.statusBar().showMessage("就绪")
+
+        self._setup_shortcuts()
+
+    def _setup_shortcuts(self) -> None:
+        """全局快捷键 (挂在主窗口; Delete 只挂在会话列表上, 避免抢编辑器按键)。"""
+        QShortcut(QKeySequence("Ctrl+F"), self, activated=self.focus_search)
+        QShortcut(QKeySequence("Ctrl+R"), self, activated=self.start_scan)
+        QShortcut(QKeySequence("Ctrl+E"), self, activated=self._on_export_current)
+        QShortcut(QKeySequence("Ctrl+D"), self, activated=self._on_clone_current)
+        QShortcut(
+            QKeySequence(Qt.Key.Key_Delete),
+            self.session_list,
+            activated=self._on_delete_current,
+        )
+
+    def focus_search(self) -> None:
+        """Ctrl+F / 仪表盘「全局搜索」: 聚焦搜索框并全选。"""
+        self.search_edit.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.search_edit.selectAll()
 
     @staticmethod
     def _make_empty(emoji: str, text: str) -> QLabel:
@@ -227,7 +265,9 @@ class MainWindow(QMainWindow):
     def _init_index(self) -> None:
         try:
             self.idx = SessionIndex()
-            self.session_list.set_tool_display_names(self._tool_display_names())
+            names = self._tool_display_names()
+            self.session_list.set_tool_display_names(names)
+            self.dashboard.set_tool_display_names(names)
             self.refresh()
         except Exception as exc:  # noqa: BLE001
             self._error("初始化索引失败", exc)
@@ -278,6 +318,8 @@ class MainWindow(QMainWindow):
         if not self._searching:
             self._populate_center()
         self._update_status_total()
+        with contextlib.suppress(Exception):
+            self.dashboard.refresh_data(idx)  # 仪表盘统计同步刷新
 
     def _update_status_total(self) -> None:
         db_path = ctxbox_data_dir() / "index.db"
@@ -296,6 +338,8 @@ class MainWindow(QMainWindow):
         if self._scan_thread is not None:
             return  # 已在扫描
         self.btn_scan.setEnabled(False)
+        self.btn_scan.setText("⏳ 扫描中…")
+        self.scan_progress.show()
         self.statusBar().showMessage("正在扫描本机 AI 工具会话…")
 
         self._scan_thread = QThread(self)
@@ -333,6 +377,8 @@ class MainWindow(QMainWindow):
 
     def _scan_cleanup(self) -> None:
         self.btn_scan.setEnabled(True)
+        self.btn_scan.setText("🔄 扫描")
+        self.scan_progress.hide()
         if self._scan_worker is not None:
             self._scan_worker.deleteLater()
         if self._scan_thread is not None:
@@ -356,7 +402,7 @@ class MainWindow(QMainWindow):
             self.session_list.set_rows(rows, search_mode=True)
             self.center_stack.setCurrentWidget(self.session_list)
         else:
-            self.center_empty.setText(f"没有命中「{query}」的会话。")
+            self.center_empty.setText(f"🔍\n\n没有找到匹配「{query}」的会话")
             self.center_stack.setCurrentWidget(self.center_empty)
         self.statusBar().showMessage(f"搜索「{query}」: 命中 {len(rows)} 条", 8000)
 
@@ -379,9 +425,15 @@ class MainWindow(QMainWindow):
 
     # --------------------------------------------------------- 打开会话 --
     def open_session(self, session_id: str) -> None:
+        """先显示加载占位, 下一拍再解析渲染 (大文件 parse 可能几百 ms)。"""
+        self.right_stack.setCurrentWidget(self.right_loading)
+        QTimer.singleShot(0, lambda: self._load_and_render(session_id))
+
+    def _load_and_render(self, session_id: str) -> None:
         try:
             session = self._require_idx().load_session(session_id)
         except Exception as exc:  # noqa: BLE001
+            self.right_stack.setCurrentWidget(self.dashboard)
             self._error("加载会话失败", exc)
             return
         self.current_session = session
@@ -468,7 +520,7 @@ class MainWindow(QMainWindow):
             raise RuntimeError("core 的 SessionIndex 暂未提供删除接口 (TODO)")
         if self.current_session and self.current_session.id == session_id:
             self.current_session = None
-            self.right_stack.setCurrentWidget(self.right_empty)
+            self.right_stack.setCurrentWidget(self.dashboard)
         self.statusBar().showMessage("已从索引删除 (源文件保留)", 5000)
         self.refresh()
 
@@ -504,17 +556,37 @@ class MainWindow(QMainWindow):
     def _on_export_current(self) -> None:
         sid = self._current_or_selected_session_id()
         if not sid:
-            QMessageBox.information(self, "提示", "请先选择一个会话。")
+            self.statusBar().showMessage("请先在中间栏选择一个会话", 4000)
             return
         try:
             self._export_session(sid)
         except Exception as exc:  # noqa: BLE001
             self._error("导出失败", exc)
 
+    def _on_clone_current(self) -> None:
+        sid = self._current_or_selected_session_id()
+        if not sid:
+            self.statusBar().showMessage("请先在中间栏选择一个会话", 4000)
+            return
+        try:
+            self._clone_session(sid)
+        except Exception as exc:  # noqa: BLE001
+            self._error("克隆失败", exc)
+
+    def _on_delete_current(self) -> None:
+        sid = self._current_or_selected_session_id()
+        if not sid:
+            self.statusBar().showMessage("请先在中间栏选择一个会话", 4000)
+            return
+        try:
+            self._delete_session(sid)
+        except Exception as exc:  # noqa: BLE001
+            self._error("删除失败", exc)
+
     def _on_inject_current(self) -> None:
         sid = self._current_or_selected_session_id()
         if not sid:
-            QMessageBox.information(self, "提示", "请先选择一个会话。")
+            self.statusBar().showMessage("请先在中间栏选择一个会话", 4000)
             return
         try:
             self._inject_session(sid)
@@ -525,8 +597,9 @@ class MainWindow(QMainWindow):
         SettingsDialog(self, on_theme_changed=self._on_theme_changed).exec()
 
     def _on_theme_changed(self) -> None:
-        """主题切换后: 卡片/气泡用的是构造时取色的内联样式, 需要重建。"""
-        self.refresh()
+        """主题切换后: 卡片/气泡/仪表盘用的是构造时取色的内联样式, 需要重建。"""
+        self.refresh()  # refresh 内部会重建导航栏/卡片并刷新仪表盘
+        self.timeline.retheme()
         if self.current_session is not None:
             self.timeline.set_turns(self.current_session.turns)
 
@@ -548,7 +621,7 @@ class MainWindow(QMainWindow):
     def _save_and_reload(self) -> None:
         self._save_session()
         sid = self.current_session.id
-        self.open_session(sid)  # 重新 parse 验证并渲染
+        self._load_and_render(sid)  # 同步重载, 保证后续操作立刻拿到最新 turn id
         self.refresh()  # 轮数/时间可能变化
 
     # -------------------------------------------------------- 轮级动作 --

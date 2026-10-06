@@ -22,7 +22,7 @@ from typing import Any
 
 from ..model.schema import ContentPart, Role, Session, Turn
 from ..normalize import read_jsonl_tolerant
-from ..utils import paths
+from ..utils import as_dict, paths
 from .base import BaseAdapter, register
 
 # Community forks sometimes rename these; alias -> canonical
@@ -138,9 +138,9 @@ class ClaudeCodeAdapter(BaseAdapter):
             if ltype == "summary":
                 title = str(obj.get("summary", "")) or title
                 continue
-            msg = obj.get("message") if isinstance(obj.get("message"), dict) else {}
+            msg = as_dict(obj.get("message"))
             role = _ROLE_MAP.get(msg.get("role") or ltype, Role.UNKNOWN)
-            usage = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
+            usage = as_dict(msg.get("usage"))
             turns.append(
                 Turn(
                     id=str(obj.get("uuid", "")),

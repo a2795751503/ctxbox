@@ -22,7 +22,7 @@ from typing import Any
 
 from ..model.schema import ContentPart, Role, Session, Turn
 from ..normalize import read_jsonl_tolerant
-from ..utils import atomic_write, paths
+from ..utils import as_dict, atomic_write, paths
 from .base import BaseAdapter, register
 
 _ROLE_MAP = {
@@ -53,7 +53,7 @@ def _payload_to_turn(
 ) -> Turn | None:
     ptype = payload.get("type")
     if ptype in _MESSAGE_TYPES:
-        role = _ROLE_MAP.get(payload.get("role"), Role.UNKNOWN)
+        role = _ROLE_MAP.get(str(payload.get("role") or ""), Role.UNKNOWN)
         parts: list[ContentPart] = []
         for block in payload.get("content") or []:
             if isinstance(block, dict):
@@ -141,7 +141,7 @@ class CodexAdapter(BaseAdapter):
                 continue
             obj = line.data
             ts = _parse_ts(obj.get("timestamp"))
-            payload = obj.get("payload") if isinstance(obj.get("payload"), dict) else {}
+            payload = as_dict(obj.get("payload"))
             if obj.get("type") == "session_meta":
                 meta_payload = payload
                 continue
@@ -205,7 +205,7 @@ class CodexAdapter(BaseAdapter):
                 continue
             if ptype in _TOOL_CALL_TYPES or (turn.parts and turn.parts[0].kind == "tool_call"):
                 p = turn.parts[0]
-                payload = {
+                payload: dict[str, Any] = {
                     "type": "function_call",
                     "name": p.tool_name or "unknown",
                     "arguments": p.text or json.dumps(p.tool_args or {}, ensure_ascii=False),

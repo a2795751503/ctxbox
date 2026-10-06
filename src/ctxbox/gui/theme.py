@@ -101,12 +101,14 @@ TOOL_COLORS = {
     "claude-code": "#d97706",  # 琥珀
     "codex": "#10b981",  # 绿
     "continue": "#6366f1",  # 紫
+    "kimi-code": "#0ea5e9",  # 天蓝
     "generic-jsonl": "#6b7280",  # 灰
 }
 TOOL_ICONS = {
     "claude-code": "🤖",
     "codex": "🌀",
     "continue": "🧩",
+    "kimi-code": "🌙",
     "generic-jsonl": "📄",
 }
 

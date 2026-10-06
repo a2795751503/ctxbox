@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from ..model.schema import ContentPart, Role, Session, Turn
-from ..utils import paths
+from ..utils import as_dict, paths
 from .base import BaseAdapter, register
 
 
@@ -133,7 +133,7 @@ class OpenCodeAdapter(BaseAdapter):
             mdata = _j(mrow["data"])
             role = Role.USER if mdata.get("role") == "user" else Role.ASSISTANT
             mts = _ts(mrow["time_created"]) or _ts((mdata.get("time") or {}).get("created"))
-            tokens = mdata.get("tokens") if isinstance(mdata.get("tokens"), dict) else {}
+            tokens = as_dict(mdata.get("tokens"))
             # user text lives in parts; assistant text/reasoning/tool too
             msg_parts: list[ContentPart] = []
             for prow in parts_by_msg.get(mrow["id"], []):

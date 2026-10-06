@@ -239,6 +239,40 @@ class TimelineWidget(QListWidget):
             lambda item: self.editRequested.emit(item.data(Qt.ItemDataRole.UserRole))
         )
 
+        # 「回到底部」浮动小圆按钮: 内容超出视口且未近底时出现
+        self.btn_bottom = QToolButton(self)
+        self.btn_bottom.setText("↓")
+        self.btn_bottom.setToolTip("回到底部")
+        self.btn_bottom.setFixedSize(36, 36)
+        self.btn_bottom.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_bottom.clicked.connect(self.scrollToBottom)
+        self.btn_bottom.hide()
+        self._restyle_bottom_btn()
+        sb = self.verticalScrollBar()
+        sb.valueChanged.connect(self._update_bottom_btn)
+        sb.rangeChanged.connect(self._update_bottom_btn)
+
+    def _restyle_bottom_btn(self) -> None:
+        t = tokens()
+        self.btn_bottom.setStyleSheet(
+            f"QToolButton {{ background: {t['accent']}; color: #ffffff; border: none;"
+            " border-radius: 18px; font-size: 16px; font-weight: 700; }"
+            f" QToolButton:hover {{ background: {t['accent_hover']}; }}"
+        )
+
+    def retheme(self) -> None:
+        """主题切换后刷新浮动按钮配色 (气泡由主窗口重建)。"""
+        self._restyle_bottom_btn()
+
+    def _update_bottom_btn(self, *_args) -> None:
+        sb = self.verticalScrollBar()
+        show = sb.maximum() > 0 and sb.value() < sb.maximum() - 40
+        self.btn_bottom.setVisible(show)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self.btn_bottom.move(self.viewport().width() - 48, self.viewport().height() - 48)
+
     def set_turns(self, turns: list[Turn]) -> None:
         self.clear()
         for turn in turns:
@@ -273,6 +307,8 @@ class TimelineWidget(QListWidget):
                     QTimer.singleShot(0, lambda: (rw.adjustSize(), it.setSizeHint(rw.sizeHint())))
 
                 coll.btn.toggled.connect(_relayout)
+
+        QTimer.singleShot(0, self._update_bottom_btn)
 
     def _on_context_menu(self, pos) -> None:
         item = self.itemAt(pos)

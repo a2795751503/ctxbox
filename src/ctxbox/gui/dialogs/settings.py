@@ -30,7 +30,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None, on_theme_changed=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("设置")
-        self.resize(540, 280)
+        self.resize(540, 480)
         self._on_theme_changed = on_theme_changed
         t = tokens()
         lay = QVBoxLayout(self)
@@ -67,6 +67,29 @@ class SettingsDialog(QDialog):
         form.addRow("索引数据库", db_lab)
 
         lay.addLayout(form)
+
+        # 快捷键一览 (静态展示)
+        t_keys = tokens()
+        group_title = QLabel("快捷键")
+        group_title.setStyleSheet(f"font-weight: 600; color: {t_keys['text']};")
+        lay.addWidget(group_title)
+        shortcuts = [
+            ("Ctrl+F", "聚焦全局搜索框"),
+            ("Ctrl+R", "重新扫描本机会话"),
+            ("Ctrl+E", "导出当前会话"),
+            ("Ctrl+D", "克隆当前会话"),
+            ("Delete", "删除当前会话 (会话列表聚焦时)"),
+            ("↑ / ↓", "在会话列表中移动选择"),
+        ]
+        keys_grid = QFormLayout()
+        for key, desc in shortcuts:
+            key_lab = QLabel(key)
+            key_lab.setStyleSheet(
+                f"font-family: 'Cascadia Code', Consolas, monospace; color: {t_keys['accent']};"
+                f" background: {t_keys['accent_soft']}; border-radius: 4px; padding: 1px 6px;"
+            )
+            keys_grid.addRow(key_lab, QLabel(desc))
+        lay.addLayout(keys_grid)
 
         note = QLabel("提示: 每次写回会话文件前, ctxbox 都会先把原文件备份到上面的备份目录。")
         note.setWordWrap(True)

@@ -28,8 +28,9 @@ _ROLE_MAP = {
 
 
 def _entry_to_turn(entry: dict[str, Any]) -> Turn:
-    msg = entry.get("message") if isinstance(entry.get("message"), dict) else entry
-    role = _ROLE_MAP.get(msg.get("role"), Role.UNKNOWN)
+    raw_msg = entry.get("message")
+    msg: dict[str, Any] = raw_msg if isinstance(raw_msg, dict) else entry
+    role = _ROLE_MAP.get(str(msg.get("role") or ""), Role.UNKNOWN)
     content = msg.get("content")
     if isinstance(content, str):
         parts = [ContentPart(kind="text", text=content, raw=entry)]

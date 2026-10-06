@@ -107,6 +107,7 @@ class NavRail(QWidget):
 
         btn_settings = QPushButton("⚙️ 设置")
         btn_settings.setProperty("kind", "secondary")
+        btn_settings.setToolTip("主题 / 备份目录 / 快捷键")
         btn_settings.clicked.connect(self.settingsRequested.emit)
         lay.addWidget(btn_settings)
 

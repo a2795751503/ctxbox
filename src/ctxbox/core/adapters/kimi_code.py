@@ -31,7 +31,7 @@ from typing import Any
 
 from ..model.schema import ContentPart, Role, Session, Turn
 from ..normalize import read_jsonl_tolerant
-from ..utils import paths
+from ..utils import as_dict, paths
 from .base import BaseAdapter, register
 
 _BOOKKEEPING_PREFIXES = (
@@ -171,9 +171,9 @@ class KimiCodeAdapter(BaseAdapter):
                 model = obj.get("modelAlias") or obj.get("model")
                 continue
             if otype in ("context.append_message", "turn.prompt"):
-                msg = obj.get("message") if isinstance(obj.get("message"), dict) else obj
+                msg = as_dict(obj.get("message")) or obj
                 role = Role.USER if msg.get("role") == "user" else Role.UNKNOWN
-                origin = (msg.get("origin") or {}).get("kind")
+                origin = as_dict(msg.get("origin")).get("kind")
                 turns.append(
                     Turn(
                         role=role,
