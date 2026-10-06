@@ -235,7 +235,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- helpers --
     def _tool_display_names(self) -> dict[str, str]:
         try:
-            return {a.name: a.display_name for a in all_adapters()}
+            # 导航栏/卡片 pill 用短名: "Codex CLI / Desktop" -> "Codex CLI"
+            return {a.name: a.display_name.split(" / ")[0] for a in all_adapters()}
         except Exception:  # noqa: BLE001
             return {}
 

@@ -8,6 +8,7 @@ from typing import Any
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
@@ -155,6 +156,8 @@ class SessionListWidget(QListWidget):
         self.setUniformItemSizes(True)
         self.setSpacing(8)
         self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
         self.itemDoubleClicked.connect(self._on_double_clicked)

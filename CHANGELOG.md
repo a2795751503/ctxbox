@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-10-06
+
+### Fixed
+- **Timeline couldn't scroll through long messages**: QListWidget scrolled
+  per-item, so a single turn taller than the viewport (long markdown
+  summaries) was unreachable — switched timeline and session list to
+  per-pixel scrolling
+- Disabled horizontal scrollbars (labels word-wrap anyway)
+- Nav rail/pill display name shortened ("Codex CLI / Desktop" → "Codex CLI")
+
 ## [0.2.0] - 2026-10-06
 
 ### Changed

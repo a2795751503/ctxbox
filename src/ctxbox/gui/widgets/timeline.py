@@ -10,6 +10,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -228,6 +229,10 @@ class TimelineWidget(QListWidget):
         super().__init__(parent)
         self.setSpacing(10)
         self.setFrameShape(QFrame.Shape.NoFrame)
+        # 关键: 按像素滚动。默认 ScrollPerItem 时, 单条消息比视口高
+        # (如超长 markdown 摘要)就永远滚不到中段, 表现为"显示不全+不能下滑"
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
         self.itemDoubleClicked.connect(
