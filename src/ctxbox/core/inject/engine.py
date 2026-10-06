@@ -25,6 +25,57 @@ class InjectResult:
     turns_verified: int = 0
 
 
+@dataclass
+class PreviewItem:
+    turn_index: int
+    kind: str  # part kind: text / tool_call / tool_result / thinking / raw …
+    action: str  # "keep" | "degrade" | "drop"
+    note: str  # human-readable explanation
+    preview: str  # first ~80 chars of the part
+
+
+# part kinds every injectable adapter understands natively
+_NATIVE_KINDS = {"text", "thinking", "tool_call", "tool_result", "code"}
+
+
+def preview_injection(session: Session, target_adapter_name: str) -> list[PreviewItem]:
+    """List how every part of the session will land in the target format.
+
+    Same-tool injection keeps everything; cross-tool degrades non-native
+    kinds (thinking/raw/image/file_ref) to marked text blocks.
+    """
+    cross_tool = session.source_tool != target_adapter_name
+    items: list[PreviewItem] = []
+    for i, turn in enumerate(session.turns):
+        for part in turn.parts:
+            kind = part.kind
+            if not cross_tool:
+                action = "keep"
+                note = (
+                    "损坏行原文保留"
+                    if (kind == "raw" and turn.meta.get("unparseable"))
+                    else "原生保留"
+                )
+            elif kind in _NATIVE_KINDS:
+                action, note = "keep", "映射为等效块"
+            elif kind == "thinking":
+                action, note = "degrade", "目标不支持思考块 → 转为 [thinking] 文本"
+            elif kind in ("image", "file_ref"):
+                action, note = "degrade", f"目标不支持 {kind} → 转为占位文本"
+            else:
+                action, note = "degrade", "未识别结构 → 转为原文文本"
+            items.append(
+                PreviewItem(
+                    turn_index=i,
+                    kind=kind,
+                    action=action,
+                    note=note,
+                    preview=(part.text or "")[:80],
+                )
+            )
+    return items
+
+
 def inject_session(
     session: Session, target_adapter_name: str, target_dir: Path | None = None
 ) -> InjectResult:

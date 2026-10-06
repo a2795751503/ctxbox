@@ -109,6 +109,67 @@ def cmd_adapters(args: argparse.Namespace) -> int:
     return 0
 
 
+def _save_session(idx: SessionIndex, session) -> None:
+    """Backup + atomic write + reindex after a mutation."""
+    from .core.adapters.base import get_adapter
+    from .core.utils import atomic_write
+
+    assert session.source_path is not None
+    backup = idx.backup_file(session.source_path)
+    adapter = get_adapter(session.source_tool)
+    atomic_write(session.source_path, adapter.serialize(session))
+    idx.upsert_session(session)
+    idx.db.commit()
+    print(f"saved (backup: {backup})")
+
+
+def cmd_replace(args: argparse.Namespace) -> int:
+    from .core.surgery import regex_replace
+
+    idx = SessionIndex()
+    session = idx.load_session(args.id, tool=args.tool)
+    roles = set(args.roles.split(",")) if args.roles else None
+    report = regex_replace(session, args.pattern, args.replacement, roles=roles)
+    if report.affected == 0:
+        print("no matches")
+        return 0
+    if not args.yes:
+        print(f"will replace {report.affected} occurrence(s); rerun with --yes to apply")
+        return 0
+    _save_session(idx, session)
+    print(
+        f"replaced {report.affected} occurrence(s) · tokens {report.tokens_before} -> {report.tokens_after}"
+    )
+    idx.close()
+    return 0
+
+
+def cmd_slim(args: argparse.Namespace) -> int:
+    from .core.surgery import slim, truncate_to_budget
+
+    idx = SessionIndex()
+    session = idx.load_session(args.id, tool=args.tool)
+    if args.budget:
+        report = truncate_to_budget(session, args.budget, keep_first=args.keep_first)
+    else:
+        report = slim(
+            session,
+            drop_tool_results=args.drop_tool_results,
+            drop_thinking=args.drop_thinking,
+            drop_tool_calls=args.drop_tool_calls,
+            max_part_chars=args.max_part_chars,
+        )
+    print(f"{'; '.join(report.details)} · tokens {report.tokens_before} -> {report.tokens_after}")
+    if report.affected == 0:
+        return 0
+    if not args.yes:
+        print("dry-run; rerun with --yes to apply")
+        return 0
+    _save_session(idx, session)
+    idx.close()
+    return 0
+
+
 def cmd_gui(args: argparse.Namespace) -> int:
     from .gui.app import main as gui_main
 
@@ -161,6 +222,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("adapters", help="list available adapters")
     s.set_defaults(func=cmd_adapters)
+
+    s = sub.add_parser("replace", help="regex find & replace inside a session")
+    s.add_argument("id")
+    s.add_argument("pattern")
+    s.add_argument("replacement")
+    s.add_argument("--tool")
+    s.add_argument("--roles", help="comma-separated: user,assistant,tool,system")
+    s.add_argument("--yes", action="store_true", help="apply (default: dry-run)")
+    s.set_defaults(func=cmd_replace)
+
+    s = sub.add_parser("slim", help="shrink a session (drop bulky parts / budget)")
+    s.add_argument("id")
+    s.add_argument("--tool")
+    s.add_argument("--drop-tool-results", action="store_true")
+    s.add_argument("--drop-thinking", action="store_true")
+    s.add_argument("--drop-tool-calls", action="store_true")
+    s.add_argument("--max-part-chars", type=int)
+    s.add_argument("--budget", type=int, help="token budget (keeps newest turns)")
+    s.add_argument("--keep-first", type=int, default=1)
+    s.add_argument("--yes", action="store_true", help="apply (default: dry-run)")
+    s.set_defaults(func=cmd_slim)
 
     s = sub.add_parser("gui", help="launch the desktop app")
     s.set_defaults(func=cmd_gui)

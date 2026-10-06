@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFrame,
@@ -53,6 +53,15 @@ def relative_time(value: Any) -> str:
 
 def _elide(text: str, limit: int = 36) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def fmt_tokens(value: int) -> str:
+    """45123 -> '45.1k' / 1234567 -> '1.23M'。"""
+    if value < 1000:
+        return str(value)
+    if value < 1_000_000:
+        return f"{value / 1000:.1f}k"
+    return f"{value / 1_000_000:.2f}M"
 
 
 class StatCard(QFrame):
@@ -157,6 +166,7 @@ class DashboardWidget(QScrollArea):
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self._tool_display: dict[str, str] = {}
+        self._token_key: tuple | None = None  # token 统计缓存键
 
         container = QWidget()
         self.setWidget(container)
@@ -173,18 +183,32 @@ class DashboardWidget(QScrollArea):
         sub.setStyleSheet(f"color: {t['text_secondary']}; font-size: 13px;")
         lay.addWidget(sub)
 
-        # 统计卡片区 (2x2)
+        # 统计卡片区 (3+2)
         self.stat_sessions = StatCard("📚", "总会话数")
         self.stat_turns = StatCard("💬", "总轮数")
         self.stat_tools = StatCard("🤖", "接入工具数")
         self.stat_snapshots = StatCard("📷", "快照总数")
+        self.stat_tokens = StatCard("🔤", "估算 token 总量")
+        self.stat_tokens.setToolTip("基于最近 30 个会话采样估算 (依赖-free chars 启发式)")
         grid = QGridLayout()
         grid.setSpacing(12)
         grid.addWidget(self.stat_sessions, 0, 0)
         grid.addWidget(self.stat_turns, 0, 1)
-        grid.addWidget(self.stat_tools, 1, 0)
-        grid.addWidget(self.stat_snapshots, 1, 1)
+        grid.addWidget(self.stat_tools, 0, 2)
+        grid.addWidget(self.stat_snapshots, 1, 0)
+        grid.addWidget(self.stat_tokens, 1, 1)
         lay.addLayout(grid)
+
+        # Top 5 大会话 (按采样内估算 token 排序)
+        t = tokens()
+        top_title = QLabel("Top 5 大会话")
+        top_title.setStyleSheet(f"font-size: 15px; font-weight: 600; color: {t['text']};")
+        lay.addWidget(top_title)
+        self._top_container = QWidget()
+        self._top_lay = QVBoxLayout(self._top_container)
+        self._top_lay.setContentsMargins(0, 0, 0, 0)
+        self._top_lay.setSpacing(8)
+        lay.addWidget(self._top_container)
 
         # 最近活跃
         recent_title = QLabel("最近活跃")
@@ -249,7 +273,13 @@ class DashboardWidget(QScrollArea):
         except Exception:  # noqa: BLE001
             total_tools = len({r["source_tool"] for r in rows})
 
-        for card in (self.stat_sessions, self.stat_turns, self.stat_tools, self.stat_snapshots):
+        for card in (
+            self.stat_sessions,
+            self.stat_turns,
+            self.stat_tools,
+            self.stat_snapshots,
+            self.stat_tokens,
+        ):
             card.restyle()
         self.stat_sessions.set_value(total_sessions)
         self.stat_turns.set_value(total_turns)
@@ -276,3 +306,53 @@ class DashboardWidget(QScrollArea):
             rr = RecentRow(row, disp)
             rr.clicked.connect(lambda sid=row["id"]: self.openRequested.emit(sid))
             self._recent_lay.addWidget(rr)
+
+        # token 采样统计较慢 (parse 最近 30 个会话), 延迟到下一拍且按数据变化缓存
+        key = (total_sessions, sort_key(rows[0]) if rows else "")
+        if key != self._token_key:
+            self._token_key = key
+            QTimer.singleShot(0, lambda: self._refresh_token_stats(idx))
+
+    def _refresh_token_stats(self, idx) -> None:
+        """采样最近 30 个会话, 估算 token 总量 + Top 5 大会话。"""
+        from ctxbox.core.surgery import session_tokens
+
+        def sort_key(r: dict) -> str:
+            v = r.get("updated_at")
+            return v.isoformat() if isinstance(v, datetime) else str(v or "")
+
+        try:
+            rows = sorted(idx.sessions(), key=sort_key, reverse=True)[:30]
+        except Exception:  # noqa: BLE001
+            return
+        total = 0
+        scored: list[tuple[int, dict]] = []
+        for row in rows:
+            try:
+                n = session_tokens(idx.load_session(row["id"]))
+            except Exception:  # noqa: BLE001 - 单个文件坏了不拖垮整页
+                continue
+            total += n
+            scored.append((n, row))
+        self.stat_tokens.set_value(total)
+
+        t = tokens()
+        while self._top_lay.count():
+            item = self._top_lay.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        for n, row in sorted(scored, reverse=True, key=lambda x: x[0])[:5]:
+            line = QFrame()
+            line.setStyleSheet(
+                f"QFrame {{ background: {t['card']}; border: 1px solid {t['border']};"
+                " border-radius: 10px; }}"
+            )
+            hl = QHBoxLayout(line)
+            hl.setContentsMargins(12, 8, 12, 8)
+            title = QLabel(_elide(row.get("title") or "(无标题)"))
+            title.setStyleSheet(f"font-size: 13px; color: {t['text']};")
+            hl.addWidget(title, 1)
+            num = QLabel(fmt_tokens(n))
+            num.setStyleSheet(f"color: {t['accent']}; font-weight: 600;")
+            hl.addWidget(num)
+            self._top_lay.addWidget(line)

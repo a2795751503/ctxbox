@@ -5,14 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWizard,
     QWizardPage,
@@ -83,7 +87,7 @@ class TargetPage(QWizardPage):
 
 
 class PreviewPage(QWizardPage):
-    """第 2 步: 预览映射。"""
+    """第 2 步: 预览映射 + 降级明细 (core.preview_injection)。"""
 
     def __init__(self, wizard: InjectWizard) -> None:
         super().__init__()
@@ -94,43 +98,71 @@ class PreviewPage(QWizardPage):
         self.info.setWordWrap(True)
         self.info.setTextFormat(Qt.TextFormat.PlainText)
         lay.addWidget(self.info)
-        lay.addStretch(1)
+        self.stats = QLabel()
+        self.stats.setStyleSheet("font-weight: 600;")
+        lay.addWidget(self.stats)
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["轮次", "类型", "处置", "说明", "预览"])
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        lay.addWidget(self.table, 1)
 
     def initializePage(self) -> None:  # noqa: N802
+        from ctxbox.core.inject.engine import preview_injection
+
+        from ..theme import tokens
+
+        t = tokens()
         s: Session = self._wizard.session
         target = self._wizard.target_page.selected_adapter_name()
-        counts: dict[str, int] = {}
-        kinds: dict[str, int] = {}
-        for t in s.turns:
-            label = role_cn(t.role)
-            counts[label] = counts.get(label, 0) + 1
-            for p in t.parts:
-                kinds[p.kind] = kinds.get(p.kind, 0) + 1
-        role_txt = " / ".join(f"{k} {v}" for k, v in counts.items())
-        kind_txt = ", ".join(f"{k}×{v}" for k, v in sorted(kinds.items()))
         target_disp = target or "(未选择)"
         for a in self._wizard.target_page.adapters:
             if a.name == target:
                 target_disp = a.display_name
                 break
-        lines = [
-            f"源会话: {s.title or s.id}",
-            f"来源工具: {s.source_tool}",
-            f"源文件: {s.source_path or '—'}",
-            "",
-            f"目标工具: {target_disp}",
-            f"目标目录: {self._wizard.target_page.target_dir() or '(默认)'}",
-            "",
-            f"共 {len(s.turns)} 轮 ({role_txt})",
-            f"内容类型: {kind_txt or '无'}",
-            "",
-            "映射说明: 每轮将按目标工具的格式转换; 目标不支持的内容类型会尽量降级为文本,",
-            "原始数据保留在 raw/meta 中, 不会丢失。",
-        ]
-        if s.parse_warnings:
-            lines.append("")
-            lines.append(f"⚠ 解析警告 {len(s.parse_warnings)} 条 (详情见会话 meta)")
-        self.info.setText("\n".join(lines))
+        counts: dict[str, int] = {}
+        for turn in s.turns:
+            label = role_cn(turn.role)
+            counts[label] = counts.get(label, 0) + 1
+        role_txt = " / ".join(f"{k} {v}" for k, v in counts.items())
+        self.info.setText(
+            f"源会话: {s.title or s.id} ({s.source_tool}, {len(s.turns)} 轮 — {role_txt})\n"
+            f"目标工具: {target_disp} · 目标目录: {self._wizard.target_page.target_dir() or '(默认)'}"
+        )
+
+        try:
+            items = preview_injection(s, target)
+        except Exception as exc:  # noqa: BLE001
+            self.stats.setText(f"⚠ 降级预览失败: {exc}")
+            self.table.setRowCount(0)
+            return
+        n_keep = sum(1 for it in items if it.action == "keep")
+        n_degrade = sum(1 for it in items if it.action == "degrade")
+        n_drop = sum(1 for it in items if it.action == "drop")
+        if n_keep == len(items):
+            self.stats.setText(f"共 {len(items)} 块 · 全部原生保留 ✅")
+        else:
+            self.stats.setText(
+                f"共 {len(items)} 块 · 保留 {n_keep} · 降级 {n_degrade} · 丢弃 {n_drop}"
+            )
+        colors = {"keep": t["success"], "degrade": t["warning"], "drop": t["danger"]}
+        labels = {"keep": "保留", "degrade": "降级", "drop": "丢弃"}
+        self.table.setRowCount(len(items))
+        for i, it in enumerate(items):
+            cells = [
+                str(it.turn_index + 1),
+                it.kind,
+                labels.get(it.action, it.action),
+                it.note,
+                (it.preview or "").replace("\n", " "),
+            ]
+            for col, text in enumerate(cells):
+                cell = QTableWidgetItem(text)
+                if col == 2:
+                    cell.setForeground(QColor(colors.get(it.action, t["text"])))
+                self.table.setItem(i, col, cell)
 
     def isComplete(self) -> bool:  # noqa: N802
         return self._wizard.target_page.selected_adapter_name() is not None

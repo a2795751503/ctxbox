@@ -36,8 +36,11 @@ from ctxbox.core.utils.atomic import atomic_write
 from ctxbox.core.utils.paths import ctxbox_data_dir
 
 from ._compat import SessionIndex, export_session
+from .dialogs.diff_confirm import confirm_save
 from .dialogs.inject_wizard import InjectWizard
 from .dialogs.settings import SettingsDialog
+from .dialogs.snapshots import SnapshotsDialog
+from .dialogs.surgery import SurgeryDialog
 from .theme import TOOL_ICONS
 from .widgets.dashboard import DashboardWidget
 from .widgets.nav_rail import NavRail
@@ -461,8 +464,54 @@ class MainWindow(QMainWindow):
                 self._export_session(session_id, md_only=True)
             elif action == "inject":
                 self._inject_session(session_id)
+            elif action == "surgery":
+                self._open_surgery(session_id)
+            elif action == "snapshots":
+                self._open_snapshots(session_id)
         except Exception as exc:  # noqa: BLE001
             self._error("操作失败", exc)
+
+    def _open_surgery(self, session_id: str) -> None:
+        """右键「上下文手术室」: 先确保当前会话已加载, 再打开手术室。"""
+        if self.current_session is None or self.current_session.id != session_id:
+            session = self._require_idx().load_session(session_id)
+            self.current_session = session
+            self.timeline.set_turns(session.turns)
+            self.right_stack.setCurrentWidget(self.timeline)
+        SurgeryDialog(self.current_session, self).exec()
+
+    def _open_snapshots(self, session_id: str) -> None:
+        idx = self._require_idx()
+        rows = [r for r in idx.sessions(dedupe=False) if r["id"] == session_id]
+        if not rows:
+            self.statusBar().showMessage("该会话没有快照文件", 4000)
+            return
+        tool = rows[0]["source_tool"]
+        dlg = SnapshotsDialog(rows, self)
+        dlg.openRequested.connect(lambda p: self.open_session_file(p, tool))
+        dlg.exec()
+
+    def open_session_file(self, path: str, tool: str) -> None:
+        """直接 parse 指定文件渲染到时间线 (不走索引, 快照查看器用)。
+
+        注意: 之后对该会话的编辑会写回这个快照文件。
+        """
+        self.right_stack.setCurrentWidget(self.right_loading)
+        QTimer.singleShot(0, lambda: self._load_file_and_render(path, tool))
+
+    def _load_file_and_render(self, path: str, tool: str) -> None:
+        try:
+            session = get_adapter(tool).parse(Path(path))
+        except Exception as exc:  # noqa: BLE001
+            self.right_stack.setCurrentWidget(self.dashboard)
+            self._error("打开快照失败", exc)
+            return
+        self.current_session = session
+        self.timeline.set_turns(session.turns)
+        self.right_stack.setCurrentWidget(self.timeline)
+        self.statusBar().showMessage(
+            f"已打开快照: {Path(path).name} ({len(session.turns)} 轮) · 编辑将写回该文件", 8000
+        )
 
     def _copy_full(self, session_id: str) -> None:
         session = self._require_idx().load_session(session_id)
@@ -604,25 +653,47 @@ class MainWindow(QMainWindow):
             self.timeline.set_turns(self.current_session.turns)
 
     # ------------------------------------------------------------- 写回 --
-    def _save_session(self) -> None:
-        """统一保存路径: 备份源文件 -> adapter.serialize -> 原子写回。"""
+    def _save_session(self, op_desc: str = "修改会话") -> bool:
+        """统一保存路径: diff 确认 -> 备份源文件 -> adapter.serialize -> 原子写回。
+
+        返回 False 表示用户在 diff 对话框里取消 (磁盘未动)。
+        """
         s = self.current_session
         if s is None:
-            return
+            return False
         if not s.source_path:
             raise RuntimeError("该会话没有源文件路径, 无法写回。")
         idx = self._require_idx()
-        idx.backup_file(Path(s.source_path))
         adapter = get_adapter(s.source_tool)
+        src = Path(s.source_path)
+        try:
+            old = adapter.parse(src)  # 磁盘现况, 用于 diff
+        except Exception:  # noqa: BLE001 - 解析失败就不挡保存
+            old = None
+        if old is not None and not confirm_save(self, old, s, op_desc, src):
+            return False
+        idx.backup_file(src)
         data = adapter.serialize(s)
-        atomic_write(Path(s.source_path), data)
+        atomic_write(src, data)
         self.statusBar().showMessage("已保存 (原文件已备份)", 5000)
+        return True
 
-    def _save_and_reload(self) -> None:
-        self._save_session()
+    def _save_and_reload(self, op_desc: str = "修改会话") -> bool:
         sid = self.current_session.id
+        if not self._save_session(op_desc):
+            self._load_and_render(sid)  # 取消: 从磁盘重载, 丢弃内存改动
+            return False
         self._load_and_render(sid)  # 同步重载, 保证后续操作立刻拿到最新 turn id
         self.refresh()  # 轮数/时间可能变化
+        return True
+
+    def apply_surgery_result(self, trial: Session) -> bool:
+        """手术室[应用更改]回调: 用试跑结果替换当前会话内容并写回。"""
+        if self.current_session is None:
+            return False
+        self.current_session.turns = trial.turns
+        self.current_session.meta.update(trial.meta)
+        return self._save_and_reload("上下文手术室批量处理")
 
     # -------------------------------------------------------- 轮级动作 --
     def _turn_index(self, turn_id: str) -> int:
@@ -644,7 +715,7 @@ class MainWindow(QMainWindow):
             return
         try:
             dlg.apply_to(turn)  # 就地修改 + meta["_edited"]=True
-            self._save_and_reload()
+            self._save_and_reload(f"编辑第 {self._turn_index(turn_id) + 1} 轮")
         except Exception as exc:  # noqa: BLE001
             self._error("保存失败", exc)
 
@@ -681,7 +752,7 @@ class MainWindow(QMainWindow):
             dlg = TurnEditorDialog(new_turn, self)
             if dlg.exec() == QDialog.DialogCode.Accepted:
                 dlg.apply_to(new_turn)
-                self._save_and_reload()
+                self._save_and_reload(f"在第 {at + 1} 位插入新轮")
             else:
                 s.delete_turn(new_turn.id)  # 取消则回滚, 不落盘
             return
@@ -698,12 +769,12 @@ class MainWindow(QMainWindow):
             )
             if ret == QMessageBox.StandardButton.Yes:
                 s.delete_turn(turn_id)
-                self._save_and_reload()
+                self._save_and_reload(f"删除第 {idx + 1} 轮")
             return
 
         if action == "clone_turn":
             s.clone_turn(turn_id)
-            self._save_and_reload()
+            self._save_and_reload(f"克隆第 {idx + 1} 轮")
             return
 
         if action == "move_up":
@@ -711,7 +782,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("已经是第一轮", 3000)
                 return
             s.move_turn(turn_id, idx - 1)
-            self._save_and_reload()
+            self._save_and_reload(f"上移第 {idx + 1} 轮")
             return
 
         if action == "move_down":
@@ -719,7 +790,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("已经是最后一轮", 3000)
                 return
             s.move_turn(turn_id, idx + 1)
-            self._save_and_reload()
+            self._save_and_reload(f"下移第 {idx + 1} 轮")
             return
 
         if action == "merge_next":
@@ -730,7 +801,7 @@ class MainWindow(QMainWindow):
             if not s.merge_turns(turn_id, nxt.id):
                 QMessageBox.information(self, "无法合并", "只能合并角色相同的两轮。")
                 return
-            self._save_and_reload()
+            self._save_and_reload(f"合并第 {idx + 1} 轮与第 {idx + 2} 轮")
             return
 
     # ------------------------------------------------------------- 关闭 --

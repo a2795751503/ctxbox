@@ -7,6 +7,7 @@ import sys
 
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -48,6 +49,17 @@ class SettingsDialog(QDialog):
         self.lang.addItems(["简体中文"])
         self.lang.setEnabled(False)  # TODO: i18n 待实现
         form.addRow("语言", self.lang)
+
+        from PySide6.QtCore import QSettings
+
+        self.diff_confirm = QCheckBox("保存前显示 diff 确认")
+        self.diff_confirm.setChecked(
+            bool(QSettings("ctxbox", "ctxbox").value("diff_confirm", True, type=bool))
+        )
+        self.diff_confirm.toggled.connect(
+            lambda checked: QSettings("ctxbox", "ctxbox").setValue("diff_confirm", bool(checked))
+        )
+        form.addRow("写回", self.diff_confirm)
 
         data_dir = ctxbox_data_dir()
         backup_dir = data_dir / "backups"

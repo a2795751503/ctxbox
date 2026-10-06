@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-07
+
+### Added
+- **Context Surgery** (🩺): regex find & replace with role filter, slim
+  (drop tool results / thinking / tool calls), oversized-part clamping,
+  token-budget truncation — every operation dry-runs on a copy and previews
+  "N affected · tokens a → b" before applying. GUI panel + CLI
+  `ctxbox replace` / `ctxbox slim`
+- **Diff confirmation before save**: unified diff of the session is shown
+  (colored +/- lines) before any write; cancellable, toggleable in Settings
+- **Injection downgrade preview**: wizard now lists every block with
+  keep/degrade/drop and explains the mapping before injecting
+- **Snapshot viewer**: browse all snapshots of a conversation (mtime, turns,
+  size) and open any of them directly
+- **Token stats**: dashboard card with estimated total + Top-5 largest
+  sessions; dependency-free `estimate_tokens` in core
+- CLI parity: `ctxbox replace`, `ctxbox slim`
+
+### Fixed
+- **Windows file-lock failures on save**: atomic writes now clear the
+  read-only flag and retry with backoff; persistent locks raise a
+  FileLockedError telling you to close the AI tool holding the session
+- Deterministic snapshot dedupe on low-resolution filesystems (ROW_NUMBER)
+
 ## [0.4.0] - 2026-10-07
 
 ### Added

@@ -216,7 +216,11 @@ class SessionListWidget(QListWidget):
             ("delete", "删除会话 (仅删索引)"),
             ("export_md", "导出 Markdown"),
             ("inject", "注入到…"),
+            ("surgery", "🩺 上下文手术室…"),
         ]
+        snapshots = row.get("snapshot_count") or 1
+        if snapshots > 1:
+            actions.append(("snapshots", f"📷 查看 {snapshots} 个快照"))
         for key, label in actions:
             act = menu.addAction(label)
             act.triggered.connect(
