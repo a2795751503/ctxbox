@@ -1,8 +1,8 @@
-"""右栏: 对话时间线。
+"""右栏: 对话时间线 (cc-switch 风格气泡)。
 
-user 气泡右对齐绿色系, assistant 左对齐蓝色系, tool/system 灰色小字块;
-kind="thinking" / "tool_call" / "tool_result" 默认折叠; kind="raw" 黄色警告样式;
-代码块等宽字体。双击某轮 -> 编辑; 右键 -> 轮级 CRUD 菜单。
+user 气泡右对齐蓝底白字, assistant 左对齐白卡, tool/system 居中浅灰虚线框;
+kind="thinking" / "tool_call" / "tool_result" 默认折叠; 噪音轮整体折叠;
+kind="raw" 浅黄警示样式; 代码块等宽字体。双击某轮 -> 编辑; 右键 -> 轮级 CRUD 菜单。
 """
 
 from __future__ import annotations
@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
 
 from ctxbox.core.model.schema import Role, Turn
 
+from ..theme import MONO_FAMILY, tokens
+
 ROLE_LABELS = {
     Role.USER: "用户",
     Role.ASSISTANT: "助手",
@@ -42,33 +44,28 @@ def role_label(role) -> str:
         return str(role)
 
 
-# 气泡配色: (背景, 边框)
-BUBBLE_COLORS = {
-    Role.USER: ("#1e3d2b", "#2f6b45"),
-    Role.ASSISTANT: ("#1f3550", "#3a5a8a"),
-    Role.SYSTEM: ("#2a2b30", "#3a3c44"),
-    Role.TOOL: ("#2a2b30", "#3a3c44"),
-    Role.UNKNOWN: ("#2a2b30", "#3a3c44"),
-}
-
-CODE_FONT = QFont("Consolas")
+CODE_FONT = QFont("Cascadia Code")
 CODE_FONT.setStyleHint(QFont.StyleHint.Monospace)
 
 
-def _mono_label(text: str) -> QLabel:
+def _mono_label(text: str, color: str = "") -> QLabel:
     lab = QLabel(text)
     lab.setFont(CODE_FONT)
     lab.setWordWrap(True)
     lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    if color:
+        lab.setStyleSheet(f"color: {color};")
     return lab
 
 
-def _text_label(text: str, small: bool = False) -> QLabel:
+def _text_label(text: str, color: str = "", size: int = 13) -> QLabel:
     lab = QLabel(text)
     lab.setWordWrap(True)
     lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-    if small:
-        lab.setStyleSheet("color: #9aa0aa; font-size: 12px;")
+    style = f"font-size: {size}px;"
+    if color:
+        style += f" color: {color};"
+    lab.setStyleSheet(style)
     return lab
 
 
@@ -77,13 +74,15 @@ class Collapsible(QFrame):
 
     def __init__(self, title: str, content: QWidget, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        t = tokens()
         self.btn = QToolButton()
         self.btn.setText(f"▶ {title}")
         self.btn.setCheckable(True)
         self.btn.setChecked(False)
         self.btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.btn.setStyleSheet(
-            "QToolButton { color: #8fa3c7; border: none; padding: 2px; font-size: 12px; }"
+            f"QToolButton {{ color: {t['text_secondary']}; border: none;"
+            " padding: 2px; font-size: 12px; }"
         )
         self.content = content
         self.content.setVisible(False)
@@ -108,15 +107,46 @@ class TurnBubble(QFrame):
     def __init__(self, turn: Turn, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.turn = turn
-        bg, border = BUBBLE_COLORS.get(turn.role, BUBBLE_COLORS[Role.UNKNOWN])
-        self.setStyleSheet(
-            f"TurnBubble {{ background: {bg}; border: 1px solid {border}; border-radius: 8px; }}"
-        )
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 8, 12, 8)
-        lay.setSpacing(4)
+        t = tokens()
+        is_noise = bool(turn.meta.get("noise"))
 
-        # 头部: 角色 + 时间 + 模型 + token + 已编辑标记
+        # 气泡配色: 浅色蓝白对话感, 深色走 DARK 令牌
+        if is_noise:
+            style = (
+                f"background: {t['noise_bg']}; border: 1px dashed {t['noise_border']};"
+                " border-radius: 14px;"
+            )
+            self._text_color = t["text_secondary"]
+            header_color = t["text_muted"]
+        elif turn.role == Role.USER:
+            style = (
+                f"background: {t['bubble_user_bg']}; border: none;"
+                " border-radius: 14px; border-bottom-right-radius: 4px;"
+            )
+            self._text_color = t["bubble_user_text"]
+            header_color = t["bubble_user_header"]
+        elif turn.role in (Role.TOOL, Role.SYSTEM):
+            style = (
+                f"background: {t['bubble_tool_bg']}; border: 1px dashed {t['bubble_tool_border']};"
+                " border-radius: 14px;"
+            )
+            self._text_color = t["bubble_tool_text"]
+            header_color = t["text_muted"]
+        else:  # assistant / unknown: 白卡
+            style = (
+                f"background: {t['bubble_assistant_bg']};"
+                f" border: 1px solid {t['bubble_assistant_border']};"
+                " border-radius: 14px; border-bottom-left-radius: 4px;"
+            )
+            self._text_color = t["bubble_assistant_text"]
+            header_color = t["text_muted"]
+        self.setStyleSheet(f"TurnBubble {{ {style} }}")
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 9, 14, 9)
+        lay.setSpacing(5)
+
+        # 头部: 角色 · 时间 · 模型 · tokens · 标记 (11px 浅灰)
         header_bits = [role_label(turn.role)]
         if turn.timestamp:
             header_bits.append(turn.timestamp.strftime("%Y-%m-%d %H:%M:%S"))
@@ -126,13 +156,13 @@ class TurnBubble(QFrame):
             header_bits.append(f"tokens {turn.tokens_in or 0}/{turn.tokens_out or 0}")
         if turn.meta.get("_edited"):
             header_bits.append("✎已编辑")
-        if turn.meta.get("noise"):
+        if is_noise:
             header_bits.append("⚙️环境/系统上下文")
         header = QLabel(" · ".join(header_bits))
-        header.setStyleSheet("color: #9aa0aa; font-size: 11px;")
+        header.setStyleSheet(f"color: {header_color}; font-size: 11px;")
         lay.addWidget(header)
 
-        if turn.meta.get("noise"):
+        if is_noise:
             # 噪音轮(工具注入的环境/系统上下文)默认整体折叠, 不再淹没时间线
             inner = QFrame()
             inner_lay = QVBoxLayout(inner)
@@ -147,36 +177,41 @@ class TurnBubble(QFrame):
             lay.addWidget(self._render_part(part))
 
     def _render_part(self, part) -> QWidget:
+        t = tokens()
         kind, text = part.kind, part.text or ""
         if kind == "thinking":
-            return Collapsible("思考过程", _text_label(text, small=True))
+            return Collapsible("💭 思考过程", _text_label(text, color=self._text_color, size=12))
         if kind in ("tool_call", "tool_result"):
-            title = f"{'🔧 调用工具' if kind == 'tool_call' else '📥 工具结果'}: {part.tool_name or '?'}"
-            return Collapsible(title, _mono_label(text or "(无内容)"))
+            title = f"{'🔧' if kind == 'tool_call' else '📥'} {part.tool_name or '?'}"
+            return Collapsible(title, _mono_label(text or "(无内容)", color=self._text_color))
         if kind == "code":
-            body = _mono_label(text)
+            body = _mono_label(text, color=t["code_text"])
             body.setStyleSheet(
-                "background: #141518; border: 1px solid #3a3c44; border-radius: 4px;"
-                " padding: 6px; color: #cfe3ff;"
+                f"background: {t['code_bg']}; border: 1px solid {t['code_border']};"
+                f" border-radius: 6px; padding: 8px; color: {t['code_text']};"
+                f" font-family: {MONO_FAMILY};"
             )
             return body
         if kind == "raw":
-            lab = _text_label(f"⚠ 无法解析的原始数据:\n{text[:2000]}", small=True)
+            lab = _text_label(f"⚠ 无法解析的原始数据:\n{text[:2000]}", size=12)
             lab.setStyleSheet(
-                "background: #4a3d1e; border: 1px solid #8a6d2f; border-radius: 4px;"
-                " padding: 6px; color: #e8c96a; font-size: 12px;"
+                f"background: {t['raw_bg']}; border: 1px solid {t['raw_border']};"
+                f" border-radius: 6px; padding: 8px; color: {t['raw_text']}; font-size: 12px;"
             )
             return lab
         if kind in ("image", "file_ref"):
-            return _text_label(f"📎 [{kind}] {part.tool_name or text}", small=True)
+            return _text_label(
+                f"📎 [{kind}] {part.tool_name or text}", color=self._text_color, size=12
+            )
         if kind == "error":
-            lab = _text_label(f"❌ {text}", small=True)
-            lab.setStyleSheet("color: #e06c75;")
-            return lab
+            return _text_label(f"❌ {text}", color=t["danger"], size=12)
         # text / diff / 其他: 普通正文
         if not text.strip():
             text = f"[{kind}]"
-        return _text_label(text)
+        mono = self.turn.role in (Role.TOOL, Role.SYSTEM)
+        if mono:
+            return _mono_label(text, color=self._text_color)
+        return _text_label(text, color=self._text_color)
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
         self.doubleClicked.emit()
@@ -191,7 +226,7 @@ class TimelineWidget(QListWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setSpacing(8)
+        self.setSpacing(10)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
@@ -203,10 +238,10 @@ class TimelineWidget(QListWidget):
         self.clear()
         for turn in turns:
             bubble = TurnBubble(turn)
-            # user 右对齐, assistant/tool/system 左对齐
+            # user 右对齐, assistant 左对齐, tool/system 居中
             row = QWidget()
             hl = QHBoxLayout(row)
-            hl.setContentsMargins(4, 0, 4, 0)
+            hl.setContentsMargins(6, 0, 6, 0)
             bubble.setMinimumWidth(180)
             if turn.role == Role.USER:
                 hl.addStretch(1)

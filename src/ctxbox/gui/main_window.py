@@ -1,4 +1,4 @@
-"""ctxbox 三栏主窗口: 左(工具分组树) | 中(会话卡片列表) | 右(对话时间线)。"""
+"""ctxbox 主窗口: 左窄导航栏 | 中(会话卡片列表) | 右(对话时间线)。"""
 
 from __future__ import annotations
 
@@ -16,25 +16,28 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QSplitter,
     QStackedWidget,
-    QToolBar,
-    QTreeWidget,
-    QTreeWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from ctxbox.core.adapters.base import all_adapters, get_adapter
 from ctxbox.core.model.schema import ContentPart, Role, Session, Turn
 from ctxbox.core.utils.atomic import atomic_write
+from ctxbox.core.utils.paths import ctxbox_data_dir
 
 from ._compat import SessionIndex, export_session
 from .dialogs.inject_wizard import InjectWizard
 from .dialogs.settings import SettingsDialog
+from .theme import TOOL_ICONS
+from .widgets.nav_rail import NavRail
 from .widgets.session_list import SessionListWidget
 from .widgets.timeline import TimelineWidget
 from .widgets.turn_editor import TurnEditorDialog
@@ -99,6 +102,10 @@ class ExportDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
+        ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        ok_btn.setProperty("kind", "primary")
+        ok_btn.style().unpolish(ok_btn)
+        ok_btn.style().polish(ok_btn)
 
     def chosen(self) -> tuple[str, bool]:
         return self.fmt.currentData(), self.redact.isChecked()
@@ -124,42 +131,62 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------------------- UI --
     def _build_ui(self) -> None:
-        tb = QToolBar("主工具栏")
-        tb.setMovable(False)
-        self.addToolBar(tb)
+        central = QWidget()
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        self.act_scan = tb.addAction("🔄 扫描")
-        self.act_scan.triggered.connect(self.start_scan)
+        # 顶栏: 页面标题 -> 胶囊搜索框 -> [扫描][导出][注入]
+        header = QWidget()
+        header.setObjectName("pageHeader")
+        hb = QHBoxLayout(header)
+        hb.setContentsMargins(16, 10, 16, 10)
+        hb.setSpacing(10)
 
-        tb.addSeparator()
+        title = QLabel("会话")
+        title.setStyleSheet("font-size: 18px; font-weight: 600;")
+        hb.addWidget(title)
+
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("全局搜索 (回车搜索, 清空恢复)…")
-        self.search_edit.setMinimumWidth(260)
+        self.search_edit.setObjectName("capsuleSearch")
+        self.search_edit.setPlaceholderText("🔍 全局搜索 (回车搜索, 清空恢复)…")
+        self.search_edit.setClearButtonEnabled(True)
         self.search_edit.returnPressed.connect(self._on_search)
         self.search_edit.textChanged.connect(self._on_search_text_changed)
-        tb.addWidget(self.search_edit)
+        hb.addWidget(self.search_edit, 1)
 
-        tb.addSeparator()
-        act_export = tb.addAction("📤 导出")
-        act_export.triggered.connect(self._on_export_current)
-        act_inject = tb.addAction("💉 注入")
-        act_inject.triggered.connect(self._on_inject_current)
-        act_settings = tb.addAction("⚙ 设置")
-        act_settings.triggered.connect(self._on_settings)
+        self.btn_scan = QPushButton("🔄 扫描")
+        self.btn_scan.setProperty("kind", "secondary")
+        self.btn_scan.clicked.connect(self.start_scan)
+        hb.addWidget(self.btn_scan)
 
-        # 三栏
+        btn_export = QPushButton("📤 导出")
+        btn_export.setProperty("kind", "secondary")
+        btn_export.clicked.connect(self._on_export_current)
+        hb.addWidget(btn_export)
+
+        btn_inject = QPushButton("💉 注入")
+        btn_inject.setProperty("kind", "primary")
+        btn_inject.clicked.connect(self._on_inject_current)
+        hb.addWidget(btn_inject)
+        root.addWidget(header)
+
+        # 主体: 左窄导航栏 | 中列表 | 右时间线
+        body = QHBoxLayout()
+        body.setContentsMargins(8, 0, 0, 0)
+        body.setSpacing(0)
+
+        self.nav = NavRail()
+        self.nav.filterChanged.connect(self._on_nav_filter)
+        self.nav.settingsRequested.connect(self._on_settings)
+        body.addWidget(self.nav)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabel("工具来源")
-        self.tree.setMinimumWidth(180)
-        self.tree.itemClicked.connect(self._on_tree_clicked)
-        splitter.addWidget(self.tree)
-
         self.center_stack = QStackedWidget()
-        self.center_empty = QLabel("暂无会话\n\n点击左上角「扫描」发现本机 AI 工具的会话。")
-        self.center_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.center_empty.setStyleSheet("color: #6f747e; font-size: 15px;")
+        self.center_empty = self._make_empty(
+            "💬", "暂无会话\n\n点击顶部「扫描」发现本机 AI 工具的会话。"
+        )
         self.session_list = SessionListWidget()
         self.session_list.openRequested.connect(self.open_session)
         self.session_list.contextAction.connect(self._on_session_action)
@@ -168,9 +195,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.center_stack)
 
         self.right_stack = QStackedWidget()
-        self.right_empty = QLabel("在中间栏选择一个会话, 这里显示对话时间线。")
-        self.right_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.right_empty.setStyleSheet("color: #6f747e; font-size: 14px;")
+        self.right_empty = self._make_empty("👈", "在中间栏选择一个会话\n这里显示对话时间线。")
         self.timeline = TimelineWidget()
         self.timeline.editRequested.connect(self._edit_turn)
         self.timeline.contextAction.connect(self._on_turn_action)
@@ -178,15 +203,26 @@ class MainWindow(QMainWindow):
         self.right_stack.addWidget(self.timeline)
         splitter.addWidget(self.right_stack)
 
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 2)
-        splitter.setStretchFactor(2, 3)
-        splitter.setSizes([220, 430, 630])
-        self.setCentralWidget(splitter)
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3)
+        splitter.setSizes([430, 650])
+        body.addWidget(splitter, 1)
+        root.addLayout(body, 1)
+        self.setCentralWidget(central)
 
-        self.status_total = QLabel("会话总数: 0")
+        # 状态栏: 右侧灰色小字 = 总数 + 索引路径
+        db_path = ctxbox_data_dir() / "index.db"
+        self.status_total = QLabel(f"共 0 个会话 · 索引: {db_path}")
         self.statusBar().addPermanentWidget(self.status_total)
         self.statusBar().showMessage("就绪")
+
+    @staticmethod
+    def _make_empty(emoji: str, text: str) -> QLabel:
+        """空状态: 大号 emoji + 灰色提示文字, 居中。"""
+        lab = QLabel(f"{emoji}\n\n{text}")
+        lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lab.setStyleSheet("color: #9ca3af; font-size: 14px; line-height: 1.6;")
+        return lab
 
     def _init_index(self) -> None:
         try:
@@ -218,7 +254,7 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------------------- 刷新 --
     def refresh(self) -> None:
-        """重新读取索引并重建左树 + 中栏。"""
+        """重新读取索引并重建导航栏 + 中栏。"""
         try:
             idx = self._require_idx()
             self._all_rows = idx.sessions()
@@ -226,24 +262,25 @@ class MainWindow(QMainWindow):
             self._error("读取会话索引失败", exc)
             return
 
-        # 左栏: 按 source_tool 分组
+        # 左窄导航栏: "📋 全部" + 按 source_tool 分组计数
         disp = self._tool_display_names()
         counts: dict[str, int] = {}
         for r in self._all_rows:
             counts[r["source_tool"]] = counts.get(r["source_tool"], 0) + 1
-        self.tree.clear()
-        root = QTreeWidgetItem([f"全部会话 ({len(self._all_rows)})"])
-        root.setData(0, Qt.ItemDataRole.UserRole, None)
-        self.tree.addTopLevelItem(root)
+        items: list[tuple[str | None, str, str, int]] = [(None, "📋", "全部", len(self._all_rows))]
         for tool in sorted(counts):
-            item = QTreeWidgetItem([f"{disp.get(tool, tool)} ({counts[tool]})"])
-            item.setData(0, Qt.ItemDataRole.UserRole, tool)
-            self.tree.addTopLevelItem(item)
-        self.tree.expandAll()
+            items.append((tool, TOOL_ICONS.get(tool, "🗂️"), disp.get(tool, tool), counts[tool]))
+        if self.current_tool_filter and self.current_tool_filter not in counts:
+            self.current_tool_filter = None  # 当前过滤的工具已没有会话, 回退到全部
+        self.nav.set_tools(items, self.current_tool_filter)
 
         if not self._searching:
             self._populate_center()
-        self.status_total.setText(f"会话总数: {len(self._all_rows)}")
+        self._update_status_total()
+
+    def _update_status_total(self) -> None:
+        db_path = ctxbox_data_dir() / "index.db"
+        self.status_total.setText(f"共 {len(self._all_rows)} 个会话 · 索引: {db_path}")
 
     def _populate_center(self) -> None:
         rows = self._visible_rows()
@@ -257,7 +294,7 @@ class MainWindow(QMainWindow):
     def start_scan(self) -> None:
         if self._scan_thread is not None:
             return  # 已在扫描
-        self.act_scan.setEnabled(False)
+        self.btn_scan.setEnabled(False)
         self.statusBar().showMessage("正在扫描本机 AI 工具会话…")
 
         self._scan_thread = QThread(self)
@@ -294,7 +331,7 @@ class MainWindow(QMainWindow):
         self._error("扫描失败", detail)
 
     def _scan_cleanup(self) -> None:
-        self.act_scan.setEnabled(True)
+        self.btn_scan.setEnabled(True)
         if self._scan_worker is not None:
             self._scan_worker.deleteLater()
         if self._scan_thread is not None:
@@ -328,13 +365,13 @@ class MainWindow(QMainWindow):
 
     def _clear_search(self) -> None:
         self._searching = False
-        self.center_empty.setText("暂无会话\n\n点击左上角「扫描」发现本机 AI 工具的会话。")
+        self.center_empty.setText("💬\n\n暂无会话\n\n点击顶部「扫描」发现本机 AI 工具的会话。")
         self._populate_center()
         self.statusBar().showMessage("就绪")
 
-    # ------------------------------------------------------------- 左栏树 --
-    def _on_tree_clicked(self, item: QTreeWidgetItem, _col: int) -> None:
-        self.current_tool_filter = item.data(0, Qt.ItemDataRole.UserRole)
+    # ------------------------------------------------------------- 导航栏 --
+    def _on_nav_filter(self, tool: str | None) -> None:
+        self.current_tool_filter = tool
         if self._searching:
             return
         self._populate_center()
@@ -484,7 +521,13 @@ class MainWindow(QMainWindow):
             self._error("注入失败", exc)
 
     def _on_settings(self) -> None:
-        SettingsDialog(self).exec()
+        SettingsDialog(self, on_theme_changed=self._on_theme_changed).exec()
+
+    def _on_theme_changed(self) -> None:
+        """主题切换后: 卡片/气泡用的是构造时取色的内联样式, 需要重建。"""
+        self.refresh()
+        if self.current_session is not None:
+            self.timeline.set_turns(self.current_session.turns)
 
     # ------------------------------------------------------------- 写回 --
     def _save_session(self) -> None:

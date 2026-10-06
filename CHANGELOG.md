@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-10-06
+
+### Changed
+- **GUI redesign, cc-switch inspired**: light theme by default (soft gray
+  canvas, white rounded cards, blue accent), left icon nav rail with tool
+  badges, capsule search box, primary/secondary button hierarchy
+- Session cards: brand-colored tool pills, hover shadow + blue border,
+  elided project paths, snapshot/hit-count pills
+- Timeline: blue right-aligned user bubbles, white assistant cards, dashed
+  tool/system blocks, amber noise-fold blocks
+- Theme system (`gui/theme.py`): light/dark token sets, instant switching in
+  Settings, persisted via QSettings
+
 ## [0.1.2] - 2026-10-06
 
 ### Fixed

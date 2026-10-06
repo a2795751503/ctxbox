@@ -47,8 +47,12 @@ class PartEditor(QFrame):
 
     def __init__(self, part: ContentPart, on_remove, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        from ..theme import tokens
+
+        t = tokens()
         self.setStyleSheet(
-            "PartEditor { background: #22232a; border: 1px solid #2e3038; border-radius: 6px; }"
+            f"PartEditor {{ background: {t['card']}; border: 1px solid {t['border']};"
+            " border-radius: 8px; }}"
         )
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 6, 8, 6)
@@ -167,7 +171,11 @@ class TurnEditorDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
+        save_btn = buttons.button(QDialogButtonBox.StandardButton.Save)
+        save_btn.setText("保存")
+        save_btn.setProperty("kind", "primary")
+        save_btn.style().unpolish(save_btn)
+        save_btn.style().polish(save_btn)
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)

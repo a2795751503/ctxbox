@@ -1,4 +1,4 @@
-"""中栏: 会话卡片列表 (QListWidget + 自定义卡片 widget + 右键菜单)."""
+"""中栏: 会话卡片列表 (cc-switch 风格白卡 + pill 徽章 + hover 阴影)."""
 
 from __future__ import annotations
 
@@ -6,8 +6,11 @@ from datetime import datetime
 from typing import Any
 
 from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFrame,
+    QGraphicsDropShadowEffect,
+    QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -16,8 +19,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-CARD_HEIGHT = 88
-CARD_HEIGHT_SEARCH = 108
+from ..theme import TOOL_COLORS, tokens
+
+CARD_HEIGHT = 92
+CARD_HEIGHT_SEARCH = 112
 
 
 def fmt_dt(value: Any) -> str:
@@ -29,25 +34,50 @@ def fmt_dt(value: Any) -> str:
     return "—"
 
 
+def _elide(text: str, limit: int = 72) -> str:
+    """粗略的中部省略, 防止超长路径撑破卡片。"""
+    if len(text) <= limit:
+        return text
+    half = (limit - 1) // 2
+    return text[:half] + "…" + text[-(limit - half - 1) :]
+
+
 class SessionCard(QFrame):
-    """一张会话卡片: 标题 / 工具·轮数·时间 / 项目路径 [/ 搜索片段]."""
+    """一张会话卡片: 标题+pill / 元信息 / 项目路径 [/ 搜索片段]."""
 
     clicked = Signal()
 
     def __init__(self, row: dict, display_name: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.row = row
+        self._hover = False
+        self._selected = False
         self.setObjectName("sessionCard")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._refresh_style(False)
 
-        title = QLabel(row.get("title") or "(无标题)")
-        title.setStyleSheet("font-weight: 600; font-size: 13px;")
-        title.setWordWrap(False)
+        t = tokens()
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 10, 14, 10)
+        lay.setSpacing(4)
 
-        meta_bits = [
-            f"{display_name} · {row.get('turn_count', '?')} 轮 · {fmt_dt(row.get('updated_at'))}"
-        ]
+        # 第一行: 标题 (14px 半粗) + 右侧工具 pill
+        row1 = QHBoxLayout()
+        title = QLabel(_elide(row.get("title") or "(无标题)", 60))
+        title.setStyleSheet(f"font-weight: 600; font-size: 14px; color: {t['text']};")
+        row1.addWidget(title, 1)
+
+        brand = TOOL_COLORS.get(row.get("source_tool", ""), "#6b7280")
+        pill = QLabel(display_name)
+        pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pill.setStyleSheet(
+            f"background: {brand}; color: #ffffff; font-size: 10px;"
+            " border-radius: 9px; padding: 2px 8px; font-weight: 600;"
+        )
+        row1.addWidget(pill, 0, Qt.AlignmentFlag.AlignVCenter)
+        lay.addLayout(row1)
+
+        # 第二行: 元信息 (12px 灰): 轮数 · 更新时间 · 📷快照 · 🔍命中
+        meta_bits = [f"{row.get('turn_count', '?')} 轮", fmt_dt(row.get("updated_at"))]
         snapshots = row.get("snapshot_count") or 1
         if snapshots > 1:
             meta_bits.append(f"📷 {snapshots} 个快照")
@@ -55,35 +85,59 @@ class SessionCard(QFrame):
         if hits > 1:
             meta_bits.append(f"🔍 {hits} 处命中")
         meta = QLabel(" · ".join(meta_bits))
-        meta.setStyleSheet("color: #9aa0aa; font-size: 12px;")
-
-        proj = QLabel(row.get("project_dir") or row.get("source_path") or "")
-        proj.setStyleSheet("color: #6f747e; font-size: 11px;")
-        proj.setWordWrap(False)
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 8, 10, 8)
-        lay.setSpacing(3)
-        lay.addWidget(title)
+        meta.setStyleSheet(f"color: {t['text_secondary']}; font-size: 12px;")
         lay.addWidget(meta)
+
+        # 第三行: 项目路径 (11px 浅灰, 省略过长)
+        proj = QLabel(_elide(row.get("project_dir") or row.get("source_path") or ""))
+        proj.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px;")
         lay.addWidget(proj)
 
         snippet = row.get("snippet")
         if snippet:
-            snip = QLabel(f"🔍 {snippet}")
-            snip.setStyleSheet("color: #d9b45c; font-size: 12px;")
-            snip.setWordWrap(False)
+            snip = QLabel(f"🔍 {_elide(snippet, 90)}")
+            snip.setStyleSheet(f"color: {t['snippet']}; font-size: 12px;")
             lay.addWidget(snip)
 
-    def set_selected(self, selected: bool) -> None:
-        self._refresh_style(selected)
+        self._refresh_style()
 
-    def _refresh_style(self, selected: bool) -> None:
-        border = "#4f7bdd" if selected else "#2e3038"
-        bg = "#262b38" if selected else "#22232a"
+    # ---------------------------------------------------------- 状态样式 --
+    def set_selected(self, selected: bool) -> None:
+        self._selected = selected
+        self._refresh_style()
+
+    def _refresh_style(self) -> None:
+        t = tokens()
+        if self._selected:
+            bg, border, width = t["accent_soft"], t["accent"], 2
+        elif self._hover:
+            bg, border, width = t["card"], t["accent_soft_border"], 1
+        else:
+            bg, border, width = t["card"], t["border"], 1
         self.setStyleSheet(
-            f"#sessionCard {{ background: {bg}; border: 1px solid {border}; border-radius: 6px; }}"
+            f"#sessionCard {{ background: {bg}; border: {width}px solid {border};"
+            " border-radius: 12px; }"
         )
+        # hover 时加深阴影, 其余时候无 (阴影在浅色主题下才有意义)
+        if self._hover and not self._selected:
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(16)
+            shadow.setXOffset(0)
+            shadow.setYOffset(2)
+            shadow.setColor(QColor(17, 24, 39, 25))
+            self.setGraphicsEffect(shadow)
+        else:
+            self.setGraphicsEffect(None)
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        self._hover = True
+        self._refresh_style()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hover = False
+        self._refresh_style()
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         self.clicked.emit()
@@ -99,7 +153,7 @@ class SessionListWidget(QListWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setUniformItemSizes(True)
-        self.setSpacing(6)
+        self.setSpacing(8)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
