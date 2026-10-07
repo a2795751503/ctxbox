@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QPushButton,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -408,6 +409,11 @@ class TimelineWidget(QListWidget):
 
         # 归并统计 (调试用): (渲染节点数, 被吃掉的结果轮数)
         self.merge_stats = (0, 0)
+        # 虚拟化状态
+        self._last_turns: list[Turn] | None = None
+        self._last_len = -1
+        self._nodes: list = []
+        self._window_start = 0
 
     def _restyle_bottom_btn(self) -> None:
         t = tokens()
@@ -431,37 +437,160 @@ class TimelineWidget(QListWidget):
         self.btn_bottom.move(self.viewport().width() - 48, self.viewport().height() - 48)
 
     # ------------------------------------------------------------ 渲染 --
-    def set_turns(self, turns: list[Turn]) -> None:
-        self.clear()
+    WINDOW = 200  # 渲染窗口: 只实例化末尾 N 个节点
+
+    def set_turns(
+        self,
+        turns: list[Turn],
+        *,
+        force: bool = False,
+        focus_turn_index: int | None = None,
+        keep_window: bool = False,
+    ) -> None:
+        # 同一 turns 对象且长度未变: refresh 触发的重复调用直接跳过
+        if not force and turns is self._last_turns and len(turns) == self._last_len:
+            return
+        self._last_turns = turns
+        self._last_len = len(turns)
+
         nodes, consumed = build_render_nodes(turns)
         self.merge_stats = (len(nodes), consumed)
-        for node in nodes:
-            if node.slim and node.activities:
-                self._add_slim_activity(node)
-            elif node.slim:
-                self._add_slim_result(node.turn)
-            else:
-                self._add_bubble(node)
+        self._nodes = nodes
+        self.clear()
+
+        # 窗口起点: 默认末尾; focus 时包住目标节点; keep_window 时尽量保持
+        if focus_turn_index is not None:
+            target = self._node_index_for_turn(turns, focus_turn_index)
+            self._window_start = (
+                max(0, target - self.WINDOW + 1)
+                if target is not None
+                else max(0, len(nodes) - self.WINDOW)
+            )
+        elif keep_window and 0 <= self._window_start <= max(0, len(nodes) - self.WINDOW):
+            pass  # 保持现有窗口
+        else:
+            self._window_start = max(0, len(nodes) - self.WINDOW)
+
+        self._add_more_button_if_needed()
+        for node in nodes[self._window_start :]:
+            self._add_item(*self._build_row(node))
+
+        if focus_turn_index is not None:
+            row_idx = (
+                self.count() - 1 - (len(nodes) - 1 - (target or 0)) if target is not None else -1
+            )
+            if 0 <= row_idx < self.count():
+                item = self.item(row_idx)
+                QTimer.singleShot(
+                    0,
+                    lambda: self.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter),
+                )
+        else:
+            # 打开会话直接定位到最新消息
+            QTimer.singleShot(0, self.scrollToBottom)
         QTimer.singleShot(0, self._update_bottom_btn)
 
-    def _add_item(self, row: QWidget, marker, turn_id: str) -> QListWidgetItem:
+    def _node_index_for_turn(self, turns: list[Turn], turn_index: int) -> int | None:
+        """turns 下标 -> 渲染节点下标 (节点含该轮或其配对结果轮)。"""
+        if not (0 <= turn_index < len(turns)):
+            return None
+        tid = turns[turn_index].id
+        for i, node in enumerate(self._nodes):
+            if node.turn.id == tid:
+                return i
+            for act in node.activities:
+                if act.result_turn is not None and act.result_turn.id == tid:
+                    return i
+        return None
+
+    # ---------------------------------------------------- 加载更早 (分页) --
+    def _add_more_button_if_needed(self) -> None:
+        """顶部"加载更早"按钮项: 还有未渲染的更早节点时存在。"""
+        if self._window_start <= 0:
+            return
+        t = tokens()
+        row = QWidget()
+        hl = QHBoxLayout(row)
+        hl.setContentsMargins(18, 0, 0, 0)
+        btn = QPushButton(f"⬆ 加载更早的 {self.WINDOW} 条 (还有 {self._window_start} 条)")
+        btn.setProperty("kind", "secondary")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(btn.styleSheet() + f" color: {t['text_secondary']};")
+        btn.clicked.connect(self.load_earlier)
+        hl.addWidget(btn)
+        hl.addStretch(1)
         row.adjustSize()
         item = QListWidgetItem()
-        item.setData(Qt.ItemDataRole.UserRole, marker)
+        item.setData(Qt.ItemDataRole.UserRole, ("more", None))
         item.setSizeHint(row.sizeHint())
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # 不可选中
         self.addItem(item)
         self.setItemWidget(item, row)
-        # 展开/收起折叠块/活动行后, 重新测量并更新行高
-        for coll in row.findChildren(Collapsible):
-            coll.btn.toggled.connect(lambda *_a, it=item, rw=row: self._relayout(it, rw))
-        for act_row in row.findChildren(ToolActivityRow):
-            act_row.toggled.connect(lambda *_a, it=item, rw=row: self._relayout(it, rw))
-        return item
 
-    def _relayout(self, item: QListWidgetItem, row: QWidget) -> None:
-        QTimer.singleShot(0, lambda: (row.adjustSize(), item.setSizeHint(row.sizeHint())))
+    def load_earlier(self) -> None:
+        """窗口向上扩展 WINDOW 个节点, 不重建已有项, 视口位置补偿不跳动。"""
+        if self._window_start <= 0:
+            return
+        sb = self.verticalScrollBar()
+        insert_pos = 1 if self.count() and self._is_more_item(self.item(0)) else 0
+        # 锚点: 第一个已有内容项; 用它的视口相对位置做精确补偿
+        anchor = self.item(insert_pos) if insert_pos < self.count() else None
+        old_top = self.visualItemRect(anchor).top() if anchor is not None else None
 
-    def _add_bubble(self, node: RenderNode) -> None:
+        new_start = max(0, self._window_start - self.WINDOW)
+        for offset, node in enumerate(self._nodes[new_start : self._window_start]):
+            row, marker = self._build_row(node)
+            row.adjustSize()
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, marker)
+            item.setSizeHint(row.sizeHint())
+            self.insertItem(insert_pos + offset, item)
+            self.setItemWidget(item, row)
+            self._hook_relayout(item, row)
+        self._window_start = new_start
+        # 更新或移除顶部按钮
+        if self.count() and self._is_more_item(self.item(0)):
+            if new_start > 0:
+                btn = self.itemWidget(self.item(0)).findChildren(QPushButton)[0]
+                btn.setText(f"⬆ 加载更早的 {self.WINDOW} 条 (还有 {new_start} 条)")
+            else:
+                self.takeItem(0)
+
+        # 视口补偿: 保持锚点的视口相对位置不变
+        # (sizeHint 与实际布局高度可能有误差, 直接按几何差值修正)
+        def _compensate() -> None:
+            if anchor is not None and old_top is not None:
+                new_top = self.visualItemRect(anchor).top()
+                delta = new_top - old_top
+                if delta:
+                    sb.setValue(sb.value() + delta)
+
+        QTimer.singleShot(0, _compensate)
+
+    @staticmethod
+    def _is_more_item(item: QListWidgetItem) -> bool:
+        marker = item.data(Qt.ItemDataRole.UserRole)
+        return isinstance(marker, tuple) and marker[0] == "more"
+
+    # ------------------------------------------------------------ 行构建 --
+    def _build_row(self, node: RenderNode) -> tuple[QWidget, tuple]:
+        """把一个渲染节点构建成 (行 widget, item 标记), 不加入列表。"""
+        if node.slim and node.activities:
+            block = SlimActivityBlock(node)
+            row = QWidget()
+            hl = QHBoxLayout(row)
+            hl.setContentsMargins(6, 0, 6, 0)
+            hl.addWidget(block, 3)
+            hl.addStretch(1)
+            return row, ("turn", node.turn.id)
+        if node.slim:
+            block = SlimResultBlock(node.turn)
+            row = QWidget()
+            hl = QHBoxLayout(row)
+            hl.setContentsMargins(6, 0, 6, 0)
+            hl.addWidget(block, 3)
+            hl.addStretch(1)
+            return row, ("turn", node.turn.id)
         turn = node.turn
         display = turn
         if node.activities:
@@ -486,25 +615,27 @@ class TimelineWidget(QListWidget):
         else:
             hl.addWidget(bubble, 3)
             hl.addStretch(1)
-        self._add_item(row, ("turn", turn.id), turn.id)
+        return row, ("turn", turn.id)
 
-    def _add_slim_activity(self, node: RenderNode) -> None:
-        block = SlimActivityBlock(node)
-        row = QWidget()
-        hl = QHBoxLayout(row)
-        hl.setContentsMargins(6, 0, 6, 0)
-        hl.addWidget(block, 3)
-        hl.addStretch(1)
-        self._add_item(row, ("turn", node.turn.id), node.turn.id)
+    def _add_item(self, row: QWidget, marker) -> QListWidgetItem:
+        row.adjustSize()
+        item = QListWidgetItem()
+        item.setData(Qt.ItemDataRole.UserRole, marker)
+        item.setSizeHint(row.sizeHint())
+        self.addItem(item)
+        self.setItemWidget(item, row)
+        self._hook_relayout(item, row)
+        return item
 
-    def _add_slim_result(self, turn: Turn) -> None:
-        block = SlimResultBlock(turn)
-        row = QWidget()
-        hl = QHBoxLayout(row)
-        hl.setContentsMargins(6, 0, 6, 0)
-        hl.addWidget(block, 3)
-        hl.addStretch(1)
-        self._add_item(row, ("turn", turn.id), turn.id)
+    def _hook_relayout(self, item: QListWidgetItem, row: QWidget) -> None:
+        # 展开/收起折叠块/活动行后, 重新测量并更新行高
+        for coll in row.findChildren(Collapsible):
+            coll.btn.toggled.connect(lambda *_a, it=item, rw=row: self._relayout(it, rw))
+        for act_row in row.findChildren(ToolActivityRow):
+            act_row.toggled.connect(lambda *_a, it=item, rw=row: self._relayout(it, rw))
+
+    def _relayout(self, item: QListWidgetItem, row: QWidget) -> None:
+        QTimer.singleShot(0, lambda: (row.adjustSize(), item.setSizeHint(row.sizeHint())))
 
     # ------------------------------------------------------------ 交互 --
     def _on_double_click(self, item: QListWidgetItem) -> None:

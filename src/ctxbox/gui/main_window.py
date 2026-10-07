@@ -7,7 +7,7 @@ import traceback
 import uuid
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -83,6 +83,48 @@ class ScanWorker(QObject):
                     idx.close()
 
 
+# ------------------------------------------------------------ 后台解析线程 --
+class ParseWorker(QObject):
+    """后台线程 parse 会话 (大文件几秒), 完成把 Session 发回主线程。
+
+    用独立的 SessionIndex 实例, 避免 sqlite 连接跨线程共享;
+    pydantic Session 对象可跨线程传递。generation 用于丢弃过期结果。
+    """
+
+    loaded = Signal(int, object)  # generation, Session
+    failed = Signal(int, str)  # generation, 错误详情
+
+    def __init__(
+        self,
+        generation: int,
+        *,
+        session_id: str | None = None,
+        file_path: str | None = None,
+        tool: str | None = None,
+    ) -> None:
+        super().__init__()
+        self.generation = generation
+        self.session_id = session_id
+        self.file_path = file_path
+        self.tool = tool
+
+    def run(self) -> None:
+        idx = None
+        try:
+            if self.session_id is not None:
+                idx = SessionIndex()
+                session = idx.load_session(self.session_id)
+            else:
+                session = get_adapter(self.tool).parse(Path(self.file_path))
+            self.loaded.emit(self.generation, session)
+        except Exception:  # noqa: BLE001
+            self.failed.emit(self.generation, traceback.format_exc(limit=5))
+        finally:
+            if idx is not None:
+                with contextlib.suppress(Exception):
+                    idx.close()
+
+
 # --------------------------------------------------------------- 导出对话框 --
 class ExportDialog(QDialog):
     """导出选项: 格式 + 脱敏开关。"""
@@ -138,6 +180,11 @@ class MainWindow(QMainWindow):
         self._searching = False
         self._scan_thread: QThread | None = None
         self._scan_worker: ScanWorker | None = None
+        self._load_gen = 0  # 加载代次: 丢弃过期的后台解析结果
+        self._load_threads: list[QThread] = []
+        self._load_workers: list[ParseWorker] = []  # 持引用防 GC
+        self._pending_focus: int | None = None
+        self._cursor_depth = 0
 
         self._build_ui()
         self._init_index()
@@ -354,6 +401,7 @@ class MainWindow(QMainWindow):
         self.btn_scan.setEnabled(False)
         self.btn_scan.setText("⏳ 扫描中…")
         self.scan_progress.show()
+        self._cursor_wait()
         self.statusBar().showMessage(f"正在扫描{label}…")
 
         self._scan_thread = QThread(self)
@@ -392,6 +440,7 @@ class MainWindow(QMainWindow):
     def _scan_cleanup(self) -> None:
         self.btn_scan.setEnabled(True)
         self.btn_scan.setText("🔄 扫描")
+        self._cursor_restore()
         self.scan_progress.hide()
         if self._scan_worker is not None:
             self._scan_worker.deleteLater()
@@ -439,19 +488,47 @@ class MainWindow(QMainWindow):
 
     # --------------------------------------------------------- 打开会话 --
     def open_session(self, session_id: str) -> None:
-        """先显示加载占位, 下一拍再解析渲染 (大文件 parse 可能几百 ms)。"""
-        self.right_stack.setCurrentWidget(self.right_loading)
-        QTimer.singleShot(0, lambda: self._load_and_render(session_id))
+        """显示加载占位, 后台线程 parse 后回主线程渲染。"""
+        self._start_load(session_id=session_id)
 
-    def _load_and_render(self, session_id: str) -> None:
-        try:
-            session = self._require_idx().load_session(session_id)
-        except Exception as exc:  # noqa: BLE001
-            self.right_stack.setCurrentWidget(self.dashboard)
-            self._error("加载会话失败", exc)
-            return
+    def _start_load(
+        self,
+        *,
+        session_id: str | None = None,
+        file_path: str | None = None,
+        tool: str | None = None,
+        focus_turn_index: int | None = None,
+    ) -> None:
+        self._load_gen += 1
+        gen = self._load_gen
+        self._pending_focus = focus_turn_index
+        self.right_stack.setCurrentWidget(self.right_loading)
+        self._cursor_wait()
+
+        thread = QThread(self)
+        worker = ParseWorker(gen, session_id=session_id, file_path=file_path, tool=tool)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.loaded.connect(self._on_session_loaded)
+        worker.failed.connect(self._on_load_failed)
+        worker.loaded.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        # 关键: 主线程必须持有 worker 引用直到结束, 否则会被 GC 中途回收
+        self._load_workers.append(worker)
+        self._load_threads.append(thread)
+        thread.finished.connect(lambda: self._load_threads.remove(thread))
+        thread.finished.connect(lambda: self._load_workers.remove(worker))
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+    def _on_session_loaded(self, gen: int, session: Session) -> None:
+        if gen != self._load_gen:
+            return  # 已有更新的加载请求, 丢弃过期结果
+        self._cursor_restore()
         self.current_session = session
-        self.timeline.set_turns(session.turns)
+        self.timeline.set_turns(session.turns, focus_turn_index=self._pending_focus)
+        self._pending_focus = None
         self.right_stack.setCurrentWidget(self.timeline)
         warns = len(session.parse_warnings or [])
         title = session.title or session.id
@@ -459,6 +536,24 @@ class MainWindow(QMainWindow):
         if warns:
             msg += f" · ⚠ {warns} 条解析警告"
         self.statusBar().showMessage(msg, 8000)
+
+    def _on_load_failed(self, gen: int, detail: str) -> None:
+        if gen != self._load_gen:
+            return
+        self._cursor_restore()
+        self.right_stack.setCurrentWidget(self.dashboard)
+        self._error("加载会话失败", detail)
+
+    # ------------------------------------------------------- 等待光标管理 --
+    def _cursor_wait(self) -> None:
+        self._cursor_depth += 1
+        if self._cursor_depth == 1:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+
+    def _cursor_restore(self) -> None:
+        self._cursor_depth = max(0, self._cursor_depth - 1)
+        if self._cursor_depth == 0:
+            QApplication.restoreOverrideCursor()
 
     # ------------------------------------------------------ 会话级右键动作 --
     def _on_session_action(self, action: str, session_id: str) -> None:
@@ -509,22 +604,7 @@ class MainWindow(QMainWindow):
 
         注意: 之后对该会话的编辑会写回这个快照文件。
         """
-        self.right_stack.setCurrentWidget(self.right_loading)
-        QTimer.singleShot(0, lambda: self._load_file_and_render(path, tool))
-
-    def _load_file_and_render(self, path: str, tool: str) -> None:
-        try:
-            session = get_adapter(tool).parse(Path(path))
-        except Exception as exc:  # noqa: BLE001
-            self.right_stack.setCurrentWidget(self.dashboard)
-            self._error("打开快照失败", exc)
-            return
-        self.current_session = session
-        self.timeline.set_turns(session.turns)
-        self.right_stack.setCurrentWidget(self.timeline)
-        self.statusBar().showMessage(
-            f"已打开快照: {Path(path).name} ({len(session.turns)} 轮) · 编辑将写回该文件", 8000
-        )
+        self._start_load(file_path=path, tool=tool)
 
     def _copy_full(self, session_id: str) -> None:
         session = self._require_idx().load_session(session_id)
@@ -713,7 +793,8 @@ class MainWindow(QMainWindow):
         self.refresh()  # refresh 内部会重建导航栏/卡片并刷新仪表盘
         self.timeline.retheme()
         if self.current_session is not None:
-            self.timeline.set_turns(self.current_session.turns)
+            # force 重建 (否则会被同对象跳过), 但保持当前窗口位置
+            self.timeline.set_turns(self.current_session.turns, force=True, keep_window=True)
 
     # ------------------------------------------------------------- 写回 --
     def _save_session(self, op_desc: str = "修改会话") -> bool:
@@ -741,14 +822,16 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("已保存 (原文件已备份)", 5000)
         return True
 
-    def _save_and_reload(self, op_desc: str = "修改会话") -> bool:
+    def _save_and_reload(
+        self, op_desc: str = "修改会话", focus_turn_index: int | None = None
+    ) -> bool:
         sid = self.current_session.id
-        if not self._save_session(op_desc):
-            self._load_and_render(sid)  # 取消: 从磁盘重载, 丢弃内存改动
-            return False
-        self._load_and_render(sid)  # 同步重载, 保证后续操作立刻拿到最新 turn id
-        self.refresh()  # 轮数/时间可能变化
-        return True
+        saved = self._save_session(op_desc)
+        # 保存与取消都走后台全量重解析 (数据正确性优先), 渲染是 200 节点窗口
+        self._start_load(session_id=sid, focus_turn_index=focus_turn_index)
+        if saved:
+            self.refresh()  # 轮数/时间可能变化
+        return saved
 
     def apply_surgery_result(self, trial: Session) -> bool:
         """手术室[应用更改]回调: 用试跑结果替换当前会话内容并写回。"""
@@ -764,10 +847,11 @@ class MainWindow(QMainWindow):
         for i, t in enumerate(s.turns):
             if t.id == turn_id:
                 return i
-        # 保存后适配器可能重建 id: 界面持有的是旧 id — 从磁盘重载一次再试
-        self._load_and_render(s.id)
-        s = self.current_session
-        for i, t in enumerate(s.turns):
+        # 保存后适配器可能重建 id: 界面持有的是旧 id — 同步从磁盘重解析一次再试
+        fresh = get_adapter(s.source_tool).parse(Path(s.source_path))
+        self.current_session = fresh
+        self.timeline.set_turns(fresh.turns, force=True, keep_window=True)
+        for i, t in enumerate(fresh.turns):
             if t.id == turn_id:
                 return i
         raise KeyError(f"找不到轮次 {turn_id}(界面已自动刷新, 请重试该操作)")
@@ -783,8 +867,9 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         try:
+            edit_idx = self._turn_index(turn_id)
             dlg.apply_to(turn)  # 就地修改 + meta["_edited"]=True
-            self._save_and_reload(f"编辑第 {self._turn_index(turn_id) + 1} 轮")
+            self._save_and_reload(f"编辑第 {edit_idx + 1} 轮", focus_turn_index=edit_idx)
         except Exception as exc:  # noqa: BLE001
             self._error("保存失败", exc)
 
@@ -820,10 +905,11 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.No,
             )
             if ret == QMessageBox.StandardButton.Yes:
+                call_idx = next((i for i, t in enumerate(s.turns) if t.id == call_id), 0)
                 s.delete_turn(call_id)
                 if result_id:
                     s.delete_turn(result_id)
-                self._save_and_reload("删除工具调用及其结果")
+                self._save_and_reload("删除工具调用及其结果", focus_turn_index=max(0, call_idx - 1))
             return
 
         idx = self._turn_index(turn_id)
@@ -839,7 +925,7 @@ class MainWindow(QMainWindow):
             dlg = TurnEditorDialog(new_turn, self)
             if dlg.exec() == QDialog.DialogCode.Accepted:
                 dlg.apply_to(new_turn)
-                self._save_and_reload(f"在第 {at + 1} 位插入新轮")
+                self._save_and_reload(f"在第 {at + 1} 位插入新轮", focus_turn_index=at)
             else:
                 s.delete_turn(new_turn.id)  # 取消则回滚, 不落盘
             return
@@ -856,12 +942,12 @@ class MainWindow(QMainWindow):
             )
             if ret == QMessageBox.StandardButton.Yes:
                 s.delete_turn(turn_id)
-                self._save_and_reload(f"删除第 {idx + 1} 轮")
+                self._save_and_reload(f"删除第 {idx + 1} 轮", focus_turn_index=max(0, idx - 1))
             return
 
         if action == "clone_turn":
             s.clone_turn(turn_id)
-            self._save_and_reload(f"克隆第 {idx + 1} 轮")
+            self._save_and_reload(f"克隆第 {idx + 1} 轮", focus_turn_index=idx + 1)
             return
 
         if action == "move_up":
@@ -869,7 +955,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("已经是第一轮", 3000)
                 return
             s.move_turn(turn_id, idx - 1)
-            self._save_and_reload(f"上移第 {idx + 1} 轮")
+            self._save_and_reload(f"上移第 {idx + 1} 轮", focus_turn_index=idx - 1)
             return
 
         if action == "move_down":
@@ -877,7 +963,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("已经是最后一轮", 3000)
                 return
             s.move_turn(turn_id, idx + 1)
-            self._save_and_reload(f"下移第 {idx + 1} 轮")
+            self._save_and_reload(f"下移第 {idx + 1} 轮", focus_turn_index=idx + 1)
             return
 
         if action == "merge_next":
@@ -888,7 +974,7 @@ class MainWindow(QMainWindow):
             if not s.merge_turns(turn_id, nxt.id):
                 QMessageBox.information(self, "无法合并", "只能合并角色相同的两轮。")
                 return
-            self._save_and_reload(f"合并第 {idx + 1} 轮与第 {idx + 2} 轮")
+            self._save_and_reload(f"合并第 {idx + 1} 轮与第 {idx + 2} 轮", focus_turn_index=idx)
             return
 
     # ------------------------------------------------------------- 关闭 --
@@ -897,6 +983,12 @@ class MainWindow(QMainWindow):
             if self._scan_thread is not None:
                 self._scan_thread.quit()
                 self._scan_thread.wait(3000)
+            for thread in list(self._load_threads):
+                thread.quit()
+                thread.wait(3000)
+            self.dashboard.shutdown()
+            while self._cursor_depth > 0:
+                self._cursor_restore()
             if self.idx is not None:
                 self.idx.close()
         except Exception:  # noqa: BLE001

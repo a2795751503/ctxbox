@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFrame,
@@ -21,9 +21,52 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .._compat import SessionIndex
 from ..theme import TOOL_COLORS, TOOL_ICONS, tokens
 
 README_URL = "https://github.com/a2795751503/ctxbox#readme"
+
+
+def _sort_key(row: dict) -> str:
+    v = row.get("updated_at")
+    return v.isoformat() if isinstance(v, datetime) else str(v or "")
+
+
+class TokenStatsWorker(QObject):
+    """后台线程采样最近 N 个会话估算 token (parse 大文件很慢, 不能堵 UI)。
+
+    用独立的 SessionIndex 实例, 避免 sqlite 连接跨线程共享。
+    """
+
+    done = Signal(int, list)  # 总量, [(tokens, row)]
+    failed = Signal(str)
+
+    def __init__(self, limit: int = 30) -> None:
+        super().__init__()
+        self.limit = limit
+
+    def run(self) -> None:
+        from ctxbox.core.surgery import session_tokens
+
+        idx = None
+        try:
+            idx = SessionIndex()
+            rows = sorted(idx.sessions(), key=_sort_key, reverse=True)[: self.limit]
+            total = 0
+            scored: list[tuple[int, dict]] = []
+            for row in rows:
+                try:
+                    n = session_tokens(idx.load_session(row["id"]))
+                except Exception:  # noqa: BLE001 - 单个文件坏了不拖垮整体
+                    continue
+                total += n
+                scored.append((n, row))
+            self.done.emit(total, scored)
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+        finally:
+            if idx is not None:
+                idx.close()
 
 
 def relative_time(value: Any) -> str:
@@ -167,6 +210,7 @@ class DashboardWidget(QScrollArea):
         self.setFrameShape(QFrame.Shape.NoFrame)
         self._tool_display: dict[str, str] = {}
         self._token_key: tuple | None = None  # token 统计缓存键
+        self._token_thread: QThread | None = None
 
         container = QWidget()
         self.setWidget(container)
@@ -313,29 +357,41 @@ class DashboardWidget(QScrollArea):
             self._token_key = key
             QTimer.singleShot(0, lambda: self._refresh_token_stats(idx))
 
-    def _refresh_token_stats(self, idx) -> None:
-        """采样最近 30 个会话, 估算 token 总量 + Top 5 大会话。"""
-        from ctxbox.core.surgery import session_tokens
+    def _refresh_token_stats(self, _idx) -> None:
+        """后台线程采样最近 30 个会话, 估算 token 总量 + Top 5 大会话。"""
+        if self._token_thread is not None:
+            return  # 上一次采样还在跑
+        self.stat_tokens.number.setText("…")
+        thread = QThread(self)
+        worker = TokenStatsWorker(limit=30)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.done.connect(self._apply_token_stats)
+        worker.failed.connect(lambda detail: self.stat_tokens.number.setText("—"))
+        worker.done.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        # 持引用防 GC (worker 无父对象, 局部变量会被回收)
+        self._token_worker = worker
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._clear_token_thread)
+        self._token_thread = thread
+        thread.start()
 
-        def sort_key(r: dict) -> str:
-            v = r.get("updated_at")
-            return v.isoformat() if isinstance(v, datetime) else str(v or "")
+    def shutdown(self) -> None:
+        """停止后台 token 采样线程 (主窗口关闭时调用)。"""
+        if self._token_thread is not None:
+            self._token_thread.quit()
+            self._token_thread.wait(3000)
+            self._token_thread = None
+            self._token_worker = None
 
-        try:
-            rows = sorted(idx.sessions(), key=sort_key, reverse=True)[:30]
-        except Exception:  # noqa: BLE001
-            return
-        total = 0
-        scored: list[tuple[int, dict]] = []
-        for row in rows:
-            try:
-                n = session_tokens(idx.load_session(row["id"]))
-            except Exception:  # noqa: BLE001 - 单个文件坏了不拖垮整页
-                continue
-            total += n
-            scored.append((n, row))
+    def _clear_token_thread(self) -> None:
+        self._token_thread = None
+        self._token_worker = None
+
+    def _apply_token_stats(self, total: int, scored: list) -> None:
         self.stat_tokens.set_value(total)
-
         t = tokens()
         while self._top_lay.count():
             item = self._top_lay.takeAt(0)
