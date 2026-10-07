@@ -30,8 +30,8 @@ def _print_progress(msg: str, i: int, total: int) -> None:
 
 def cmd_scan(args: argparse.Namespace) -> int:
     idx = SessionIndex()
-    n = idx.rescan(progress_cb=_print_progress)
-    print(f"\nScanned {n} sessions.")
+    n = idx.rescan(progress_cb=_print_progress, tool=args.tool)
+    print(f"\nScanned {n} file(s).")
     for tool, count in idx.tools_summary():
         print(f"  {tool:<15} {count}")
     idx.close()
@@ -183,7 +183,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"ctxbox {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
-    s = sub.add_parser("scan", help="discover & index all sessions")
+    s = sub.add_parser("scan", help="discover & index sessions")
+    s.add_argument("--tool", help="scan only this adapter (e.g. codex, kimi-code)")
     s.set_defaults(func=cmd_scan)
 
     s = sub.add_parser("list", help="list indexed sessions")

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -92,6 +93,7 @@ class NavRail(QWidget):
 
     filterChanged = Signal(object)  # source_tool (str) 或 None = 全部
     settingsRequested = Signal()
+    rescanRequested = Signal(object)  # source_tool (str); None = 全部
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -103,6 +105,9 @@ class NavRail(QWidget):
         self.listw = QListWidget()
         self.listw.setSpacing(2)
         self.listw.setFrameShape(QFrame.Shape.NoFrame)
+        # 右键: 按底座单独重扫
+        self.listw.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.listw.customContextMenuRequested.connect(self._on_context_menu)
         lay.addWidget(self.listw, 1)
 
         btn_settings = QPushButton("⚙️ 设置")
@@ -110,6 +115,20 @@ class NavRail(QWidget):
         btn_settings.setToolTip("主题 / 备份目录 / 快捷键")
         btn_settings.clicked.connect(self.settingsRequested.emit)
         lay.addWidget(btn_settings)
+
+    def _on_context_menu(self, pos) -> None:
+        item = self.listw.itemAt(pos)
+        if item is None:
+            return
+        self._select(item)
+        tool = item.data(Qt.ItemDataRole.UserRole)
+        menu = QMenu(self)
+        if tool:
+            act = menu.addAction("🔄 重新扫描该工具")
+            act.triggered.connect(lambda: self.rescanRequested.emit(tool))
+        act_all = menu.addAction("🔄 重新扫描全部")
+        act_all.triggered.connect(lambda: self.rescanRequested.emit(None))
+        menu.exec(self.listw.viewport().mapToGlobal(pos))
 
     def set_tools(
         self,

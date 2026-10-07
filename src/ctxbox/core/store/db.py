@@ -102,24 +102,53 @@ class SessionIndex:
 
     # ---- scanning ----
 
-    def rescan(self, progress_cb: Callable[[str, int, int], None] | None = None) -> int:
-        """Discover and (re)parse sessions from every adapter. Returns count."""
+    def rescan(
+        self,
+        progress_cb: Callable[[str, int, int], None] | None = None,
+        tool: str | None = None,
+    ) -> int:
+        """Discover and (re)parse sessions. tool=None scans every adapter;
+        pass an adapter name to rescan only that tool's directories."""
         total = 0
         adapters = all_adapters()
+        if tool:
+            adapters = [a for a in adapters if a.name == tool]
         files: list[tuple[str, Path]] = []
         for ad in adapters:
             for p in ad.detect():
                 files.append((ad.name, p))
-        for i, (tool, path) in enumerate(files, start=1):
+        for i, (t, path) in enumerate(files, start=1):
             if progress_cb:
-                progress_cb(f"{tool}: {path.name}", i, len(files))
+                progress_cb(f"{t}: {path.name}", i, len(files))
             try:
-                self._upsert_file(tool, path)
+                self._upsert_file(t, path)
                 total += 1
             except Exception as exc:  # a broken file must never kill the scan
-                self._record_error(tool, path, str(exc))
+                self._record_error(t, path, str(exc))
+        self.prune(tool=tool)
         self.db.commit()
         return total
+
+    def prune(self, tool: str | None = None) -> int:
+        """Drop index rows whose source file no longer exists (scoped to
+        `tool` when given). Keeps the index honest after files are deleted."""
+        sql = "SELECT source_tool, source_path, id FROM sessions"
+        params: tuple = ()
+        if tool:
+            sql += " WHERE source_tool=?"
+            params = (tool,)
+        stale = [
+            (t, p, i)
+            for t, p, i in self.db.execute(sql, params).fetchall()
+            if p and not Path(p).exists()
+        ]
+        for t, p, i in stale:
+            self.db.execute(
+                "DELETE FROM sessions WHERE source_tool=? AND source_path=? AND id=?",
+                (t, p, i),
+            )
+            self.db.execute("DELETE FROM turns_fts WHERE session_key=?", (f"{t}::{i}::{p}",))
+        return len(stale)
 
     def _upsert_file(self, tool: str, path: Path) -> None:
         mtime = path.stat().st_mtime

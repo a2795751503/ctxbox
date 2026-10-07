@@ -60,13 +60,20 @@ class ScanWorker(QObject):
     finished_ok = Signal(int)  # 会话总数
     failed = Signal(str)
 
+    def __init__(self, tool: str | None = None) -> None:
+        super().__init__()
+        self.tool = tool  # None=全盘; 传适配器名则只扫该底座
+
     def run(self) -> None:
         idx = None
         try:
             idx = SessionIndex()
             # progress_cb 签名以 core 实现为准 (可能带 tool 名等额外参数),
             # 约定最后两个参数是 (done, total)
-            n = idx.rescan(progress_cb=lambda *a: self.progress.emit(int(a[-2]), int(a[-1])))
+            n = idx.rescan(
+                progress_cb=lambda *a: self.progress.emit(int(a[-2]), int(a[-1])),
+                tool=self.tool,
+            )
             self.finished_ok.emit(n)
         except Exception:  # noqa: BLE001
             self.failed.emit(traceback.format_exc(limit=5))
@@ -164,7 +171,9 @@ class MainWindow(QMainWindow):
 
         self.btn_scan = QPushButton("🔄 扫描")
         self.btn_scan.setProperty("kind", "secondary")
-        self.btn_scan.setToolTip("重新扫描本机所有 AI 工具的会话 (Ctrl+R)")
+        self.btn_scan.setToolTip(
+            "重新扫描本机所有 AI 工具的会话 (Ctrl+R)\n单独重扫某个底座: 左侧导航栏右键该工具"
+        )
         self.btn_scan.clicked.connect(self.start_scan)
         hb.addWidget(self.btn_scan)
 
@@ -189,6 +198,7 @@ class MainWindow(QMainWindow):
         self.nav = NavRail()
         self.nav.filterChanged.connect(self._on_nav_filter)
         self.nav.settingsRequested.connect(self._on_settings)
+        self.nav.rescanRequested.connect(lambda tool: self.start_scan(tool))
         body.addWidget(self.nav)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -337,16 +347,17 @@ class MainWindow(QMainWindow):
             self.center_stack.setCurrentWidget(self.center_empty)
 
     # ---------------------------------------------------------------- 扫描 --
-    def start_scan(self) -> None:
+    def start_scan(self, tool: str | None = None) -> None:
         if self._scan_thread is not None:
             return  # 已在扫描
+        label = f"「{tool}」" if tool else "全部底座"
         self.btn_scan.setEnabled(False)
         self.btn_scan.setText("⏳ 扫描中…")
         self.scan_progress.show()
-        self.statusBar().showMessage("正在扫描本机 AI 工具会话…")
+        self.statusBar().showMessage(f"正在扫描{label}…")
 
         self._scan_thread = QThread(self)
-        self._scan_worker = ScanWorker()
+        self._scan_worker = ScanWorker(tool=tool)
         self._scan_worker.moveToThread(self._scan_thread)
         self._scan_thread.started.connect(self._scan_worker.run)
         self._scan_worker.progress.connect(self._on_scan_progress)
