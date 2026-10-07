@@ -152,6 +152,7 @@ class KimiCodeAdapter(BaseAdapter):
         # .../sessions/<wd_*>/session_<uuid>/agents/main/wire.jsonl
         session_id = path.parents[2].name
         model: str | None = None
+        call_names: dict[str, str] = {}  # toolCallId -> tool name (回填结果块)
         turns: list[Turn] = []
         skipped = 0
         for line in result.lines:
@@ -185,10 +186,18 @@ class KimiCodeAdapter(BaseAdapter):
                 continue
             if otype == "context.append_loop_event":
                 ev = obj.get("event") or {}
+                if ev.get("type") == "tool.call":
+                    cid = ev.get("toolCallId") or ev.get("uuid")
+                    if cid and ev.get("name"):
+                        call_names[str(cid)] = str(ev["name"])
                 turn = _loop_event_to_turn(ev, ts, model)
                 if turn is None:
                     skipped += 1
                     continue
+                # 结果块回填真实工具名 (折叠标题不再显示 '?')
+                for p in turn.parts:
+                    if p.kind == "tool_result" and not p.tool_name:
+                        p.tool_name = call_names.get(str(ev.get("toolCallId") or ""))
                 turns.append(turn)
                 continue
             if any(otype.startswith(p) for p in _BOOKKEEPING_PREFIXES):

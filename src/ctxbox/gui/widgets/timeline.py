@@ -1,8 +1,10 @@
-"""右栏: 对话时间线 (cc-switch 风格气泡)。
+"""右栏: 对话时间线 (参考 Claude.ai / ChatGPT / open-webui 的对话设计)。
 
-user 气泡右对齐蓝底白字, assistant 左对齐白卡, tool/system 居中浅灰虚线框;
-kind="thinking" / "tool_call" / "tool_result" 默认折叠; 噪音轮整体折叠;
-kind="raw" 浅黄警示样式; 代码块等宽字体。双击某轮 -> 编辑; 右键 -> 轮级 CRUD 菜单。
+- user 右对齐蓝底白字, assistant 左对齐白卡, tool/system 居中浅灰虚线框
+- tool_call 与紧邻 tool_result 在渲染层归并为「工具活动行」(见 tool_rows.py)
+- 只有工具调用的助手轮/未配对的结果轮: 无气泡 chrome 的瘦行渲染
+- thinking/tool 折叠块标题全部带内容预览; 代码块带复制按钮
+- 双击编辑, 右键轮级 CRUD; 行高重测覆盖折叠块与活动行展开
 """
 
 from __future__ import annotations
@@ -25,6 +27,17 @@ from PySide6.QtWidgets import (
 from ctxbox.core.model.schema import Role, Turn
 
 from ..theme import MONO_FAMILY, tokens
+from .tool_rows import (
+    ActivityNode,
+    RenderNode,
+    ToolActivityRow,
+    arg_summary,
+    build_render_nodes,
+    copy_to_clipboard,
+    text_preview,
+    tool_label,
+    truncate_result,
+)
 
 ROLE_LABELS = {
     Role.USER: "用户",
@@ -63,7 +76,7 @@ def _text_label(text: str, color: str = "", size: int = 13) -> QLabel:
     lab = QLabel(text)
     lab.setWordWrap(True)
     lab.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-    style = f"font-size: {size}px;"
+    style = f"font-size: {size}px; padding: 4px 0px;"
     if color:
         style += f" color: {color};"
     lab.setStyleSheet(style)
@@ -100,12 +113,79 @@ class Collapsible(QFrame):
         self.btn.setText(self.btn.text().replace("▶" if checked else "▼", "▼" if checked else "▶"))
 
 
-class TurnBubble(QFrame):
-    """单轮气泡, 渲染一个 Turn 的所有 ContentPart。"""
+class CodeBlock(QFrame):
+    """代码块: mono 正文 + 右上角复制小按钮。"""
+
+    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        t = tokens()
+        self.setStyleSheet(
+            f"CodeBlock {{ background: {t['code_bg']}; border: 1px solid {t['code_border']};"
+            " border-radius: 6px; }}"
+        )
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8, 6, 4, 6)
+        body = _mono_label(text, color=t["code_text"])
+        body.setStyleSheet(f"font-family: {MONO_FAMILY}; color: {t['code_text']};")
+        lay.addWidget(body, 1)
+
+        btn = QToolButton()
+        btn.setText("📋")
+        btn.setToolTip("复制代码")
+        btn.setFixedSize(24, 24)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet("QToolButton { border: none; font-size: 12px; }")
+
+        def _copy() -> None:
+            copy_to_clipboard(text)
+            btn.setText("✓")
+            QTimer.singleShot(1000, lambda: btn.setText("📋"))
+
+        btn.clicked.connect(_copy)
+        lay.addWidget(btn, 0, Qt.AlignmentFlag.AlignTop)
+
+
+def _find_timeline(widget: QWidget) -> TimelineWidget | None:
+    w = widget.parent()
+    while w is not None and not isinstance(w, TimelineWidget):
+        w = w.parent()
+    return w
+
+
+class _ActivityForwarder:
+    """把活动行的 edit/delete/copy 信号转发到 TimelineWidget 的统一信号。"""
+
+    def _forward_edit(self, turn_id: str) -> None:
+        tl = _find_timeline(self)
+        if tl is not None:
+            tl.editRequested.emit(turn_id)
+
+    def _forward_action(self, key: str, act: ActivityNode) -> None:
+        tl = _find_timeline(self)
+        if tl is None:
+            return
+        if key == "delete_pair":
+            payload = act.call_turn.id
+            if act.result_turn is not None:
+                payload += "|" + act.result_turn.id
+            tl.contextAction.emit("delete_pair", payload)
+        elif key == "edit":
+            tl.editRequested.emit(act.call_turn.id)
+        else:
+            tl.contextAction.emit(key, act.call_turn.id)
+
+
+class TurnBubble(_ActivityForwarder, QFrame):
+    """单轮气泡, 渲染一个 Turn 的正文 parts + 抽出的工具活动行。"""
 
     doubleClicked = Signal()
 
-    def __init__(self, turn: Turn, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        turn: Turn,
+        activities: list[ActivityNode] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.turn = turn
         t = tokens()
@@ -146,10 +226,34 @@ class TurnBubble(QFrame):
         self.setStyleSheet(f"TurnBubble {{ {style} color: {self._text_color}; }}")
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 9, 14, 9)
+        lay.setContentsMargins(16, 10, 16, 10)
         lay.setSpacing(5)
 
         # 头部: 角色 · 时间 · 模型 · tokens · 标记 (11px 浅灰)
+        lay.addWidget(self._make_header(turn, header_color, is_noise))
+
+        if is_noise:
+            # 噪音轮(工具注入的环境/系统上下文)默认整体折叠, 不再淹没时间线
+            inner = QFrame()
+            inner_lay = QVBoxLayout(inner)
+            inner_lay.setContentsMargins(0, 0, 0, 0)
+            for part in turn.parts:
+                inner_lay.addWidget(self._render_part(part))
+            preview = text_preview(turn.text() or "")
+            lay.addWidget(Collapsible(f"⚙️ 环境/系统上下文 — {preview}", inner))
+            return
+
+        for part in turn.parts:
+            lay.addWidget(self._render_part(part))
+
+        # 抽出的工具活动行: 缩进附在气泡正文之下
+        for act in activities or []:
+            row = ToolActivityRow(act)
+            row.editRequested.connect(lambda tid=act.call_turn.id: self._forward_edit(tid))
+            row.contextAction.connect(lambda key, a=act: self._forward_action(key, a))
+            lay.addWidget(row)
+
+    def _make_header(self, turn: Turn, color: str, is_noise: bool) -> QLabel:
         header_bits = [role_label(turn.role)]
         if turn.timestamp:
             header_bits.append(turn.timestamp.strftime("%Y-%m-%d %H:%M:%S"))
@@ -162,39 +266,27 @@ class TurnBubble(QFrame):
         if is_noise:
             header_bits.append("⚙️环境/系统上下文")
         header = QLabel(" · ".join(header_bits))
-        header.setStyleSheet(f"color: {header_color}; font-size: 11px;")
-        lay.addWidget(header)
-
-        if is_noise:
-            # 噪音轮(工具注入的环境/系统上下文)默认整体折叠, 不再淹没时间线
-            inner = QFrame()
-            inner_lay = QVBoxLayout(inner)
-            inner_lay.setContentsMargins(0, 0, 0, 0)
-            for part in turn.parts:
-                inner_lay.addWidget(self._render_part(part))
-            preview = (turn.text() or "").strip().splitlines()[0][:60] if turn.text() else ""
-            lay.addWidget(Collapsible(f"⚙️ 环境/系统上下文 · {preview}…", inner))
-            return
-
-        for part in turn.parts:
-            lay.addWidget(self._render_part(part))
+        header.setStyleSheet(f"color: {color}; font-size: 11px;")
+        return header
 
     def _render_part(self, part) -> QWidget:
         t = tokens()
         kind, text = part.kind, part.text or ""
         if kind == "thinking":
-            return Collapsible("💭 思考过程", _text_label(text, color=self._text_color, size=12))
-        if kind in ("tool_call", "tool_result"):
-            title = f"{'🔧' if kind == 'tool_call' else '📥'} {part.tool_name or '?'}"
-            return Collapsible(title, _mono_label(text or "(无内容)", color=self._text_color))
-        if kind == "code":
-            body = _mono_label(text, color=t["code_text"])
-            body.setStyleSheet(
-                f"background: {t['code_bg']}; border: 1px solid {t['code_border']};"
-                f" border-radius: 6px; padding: 8px; color: {t['code_text']};"
-                f" font-family: {MONO_FAMILY};"
+            title = f"💭 思考过程 — {text_preview(text)}" if text.strip() else "💭 思考过程"
+            return Collapsible(title, _text_label(text, color=self._text_color, size=12))
+        if kind == "tool_call":  # 噪音轮内等未抽出的调用
+            return Collapsible(
+                f"🔧 {tool_label(part)} — {arg_summary(part)}",
+                _mono_label(text or "(无内容)", color=self._text_color),
             )
-            return body
+        if kind == "tool_result":
+            return Collapsible(
+                f"📥 {tool_label(part)} ✓",
+                _mono_label(text or "(无内容)", color=self._text_color),
+            )
+        if kind == "code":
+            return CodeBlock(text)
         if kind == "raw":
             lab = _text_label(f"⚠ 无法解析的原始数据:\n{text[:2000]}", size=12)
             lab.setStyleSheet(
@@ -221,11 +313,73 @@ class TurnBubble(QFrame):
         super().mouseDoubleClickEvent(event)
 
 
+class SlimActivityBlock(_ActivityForwarder, QFrame):
+    """只有工具调用的助手轮: 无气泡 chrome, 一行小灰字头部 + 活动行。"""
+
+    def __init__(self, node: RenderNode, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.node = node
+        t = tokens()
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 0, 0, 0)
+        lay.setSpacing(3)
+
+        turn = node.turn
+        bits = ["助手"]
+        if turn.timestamp:
+            bits.append(turn.timestamp.strftime("%H:%M:%S"))
+        if turn.model:
+            bits.append(turn.model)
+        header = QLabel(" · ".join(bits))
+        header.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px;")
+        lay.addWidget(header)
+
+        for act in node.activities:
+            row = ToolActivityRow(act)
+            row.editRequested.connect(lambda tid=act.call_turn.id: self._forward_edit(tid))
+            row.contextAction.connect(lambda key, a=act: self._forward_action(key, a))
+            lay.addWidget(row)
+
+
+class SlimResultBlock(QFrame):
+    """未配对的全 tool_result 轮: 瘦行 + 带工具名/预览的折叠块。"""
+
+    def __init__(self, turn: Turn, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        t = tokens()
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 0, 0, 0)
+        lay.setSpacing(3)
+
+        bits = ["工具"]
+        if turn.timestamp:
+            bits.append(turn.timestamp.strftime("%H:%M:%S"))
+        header = QLabel(" · ".join(bits))
+        header.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px;")
+        lay.addWidget(header)
+
+        for part in turn.parts:
+            name = tool_label(part)
+            text = part.text or ""
+            result_text, truncated = truncate_result(text)
+            if truncated:
+                result_text += "\n…[已截断, 双击编辑查看全部]"
+            preview = text_preview(text)
+            title = f"📥 {name} — {preview}" if preview else f"📥 {name} ✓"
+            body = _mono_label(result_text or "(空结果)", color=t["code_text"])
+            body.setStyleSheet(
+                f"background: {t['code_bg']}; border: 1px solid {t['code_border']};"
+                f" border-radius: 4px; padding: 6px; color: {t['code_text']};"
+                f" font-family: {MONO_FAMILY}; font-size: 12px;"
+            )
+            lay.addWidget(Collapsible(title, body))
+
+
 class TimelineWidget(QListWidget):
     """对话时间线列表。"""
 
     editRequested = Signal(str)  # turn_id
-    contextAction = Signal(str, str)  # (action_key, turn_id)
+    contextAction = Signal(str, str)  # (action_key, turn_id 或 "call|result")
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -237,9 +391,7 @@ class TimelineWidget(QListWidget):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
-        self.itemDoubleClicked.connect(
-            lambda item: self.editRequested.emit(item.data(Qt.ItemDataRole.UserRole))
-        )
+        self.itemDoubleClicked.connect(self._on_double_click)
 
         # 「回到底部」浮动小圆按钮: 内容超出视口且未近底时出现
         self.btn_bottom = QToolButton(self)
@@ -253,6 +405,9 @@ class TimelineWidget(QListWidget):
         sb = self.verticalScrollBar()
         sb.valueChanged.connect(self._update_bottom_btn)
         sb.rangeChanged.connect(self._update_bottom_btn)
+
+        # 归并统计 (调试用): (渲染节点数, 被吃掉的结果轮数)
+        self.merge_stats = (0, 0)
 
     def _restyle_bottom_btn(self) -> None:
         t = tokens()
@@ -275,49 +430,97 @@ class TimelineWidget(QListWidget):
         super().resizeEvent(event)
         self.btn_bottom.move(self.viewport().width() - 48, self.viewport().height() - 48)
 
+    # ------------------------------------------------------------ 渲染 --
     def set_turns(self, turns: list[Turn]) -> None:
         self.clear()
-        for turn in turns:
-            bubble = TurnBubble(turn)
-            # user 右对齐, assistant 左对齐, tool/system 居中
-            row = QWidget()
-            hl = QHBoxLayout(row)
-            hl.setContentsMargins(6, 0, 6, 0)
-            bubble.setMinimumWidth(180)
-            if turn.role == Role.USER:
-                hl.addStretch(1)
-                hl.addWidget(bubble, 3)
-            elif turn.role in (Role.TOOL, Role.SYSTEM):
-                hl.addStretch(1)
-                hl.addWidget(bubble, 6)
-                hl.addStretch(1)
+        nodes, consumed = build_render_nodes(turns)
+        self.merge_stats = (len(nodes), consumed)
+        for node in nodes:
+            if node.slim and node.activities:
+                self._add_slim_activity(node)
+            elif node.slim:
+                self._add_slim_result(node.turn)
             else:
-                hl.addWidget(bubble, 3)
-                hl.addStretch(1)
-            row.adjustSize()
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, turn.id)
-            item.setSizeHint(row.sizeHint())
-            self.addItem(item)
-            self.setItemWidget(item, row)
-            bubble.doubleClicked.connect(lambda tid=turn.id: self.editRequested.emit(tid))
-            # 展开/收起折叠块(思考/工具/噪音)后, 重新测量并更新行高,
-            # 否则行高是创建时固定的, 内容会被压扁
-            for coll in bubble.findChildren(Collapsible):
-
-                def _relayout(_c: bool, it=item, rw=row) -> None:
-                    QTimer.singleShot(0, lambda: (rw.adjustSize(), it.setSizeHint(rw.sizeHint())))
-
-                coll.btn.toggled.connect(_relayout)
-
+                self._add_bubble(node)
         QTimer.singleShot(0, self._update_bottom_btn)
+
+    def _add_item(self, row: QWidget, marker, turn_id: str) -> QListWidgetItem:
+        row.adjustSize()
+        item = QListWidgetItem()
+        item.setData(Qt.ItemDataRole.UserRole, marker)
+        item.setSizeHint(row.sizeHint())
+        self.addItem(item)
+        self.setItemWidget(item, row)
+        # 展开/收起折叠块/活动行后, 重新测量并更新行高
+        for coll in row.findChildren(Collapsible):
+            coll.btn.toggled.connect(lambda *_a, it=item, rw=row: self._relayout(it, rw))
+        for act_row in row.findChildren(ToolActivityRow):
+            act_row.toggled.connect(lambda *_a, it=item, rw=row: self._relayout(it, rw))
+        return item
+
+    def _relayout(self, item: QListWidgetItem, row: QWidget) -> None:
+        QTimer.singleShot(0, lambda: (row.adjustSize(), item.setSizeHint(row.sizeHint())))
+
+    def _add_bubble(self, node: RenderNode) -> None:
+        turn = node.turn
+        display = turn
+        if node.activities:
+            # text/thinking 留在气泡, tool_call 已抽成活动行
+            display = turn.model_copy(
+                update={"parts": [p for p in turn.parts if p.kind != "tool_call"]}
+            )
+        bubble = TurnBubble(display, activities=node.activities)
+        bubble.doubleClicked.connect(lambda tid=turn.id: self.editRequested.emit(tid))
+
+        row = QWidget()
+        hl = QHBoxLayout(row)
+        hl.setContentsMargins(6, 0, 6, 0)
+        bubble.setMinimumWidth(180)
+        if turn.role == Role.USER:
+            hl.addStretch(1)
+            hl.addWidget(bubble, 3)
+        elif turn.role in (Role.TOOL, Role.SYSTEM):
+            hl.addStretch(1)
+            hl.addWidget(bubble, 6)
+            hl.addStretch(1)
+        else:
+            hl.addWidget(bubble, 3)
+            hl.addStretch(1)
+        self._add_item(row, ("turn", turn.id), turn.id)
+
+    def _add_slim_activity(self, node: RenderNode) -> None:
+        block = SlimActivityBlock(node)
+        row = QWidget()
+        hl = QHBoxLayout(row)
+        hl.setContentsMargins(6, 0, 6, 0)
+        hl.addWidget(block, 3)
+        hl.addStretch(1)
+        self._add_item(row, ("turn", node.turn.id), node.turn.id)
+
+    def _add_slim_result(self, turn: Turn) -> None:
+        block = SlimResultBlock(turn)
+        row = QWidget()
+        hl = QHBoxLayout(row)
+        hl.setContentsMargins(6, 0, 6, 0)
+        hl.addWidget(block, 3)
+        hl.addStretch(1)
+        self._add_item(row, ("turn", turn.id), turn.id)
+
+    # ------------------------------------------------------------ 交互 --
+    def _on_double_click(self, item: QListWidgetItem) -> None:
+        marker = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(marker, tuple) and marker[0] == "turn":
+            self.editRequested.emit(marker[1])
 
     def _on_context_menu(self, pos) -> None:
         item = self.itemAt(pos)
         if item is None:
             return
         self.setCurrentItem(item)
-        tid = item.data(Qt.ItemDataRole.UserRole)
+        marker = item.data(Qt.ItemDataRole.UserRole)
+        if not (isinstance(marker, tuple) and marker[0] == "turn"):
+            return
+        tid = marker[1]
         menu = QMenu(self)
         actions = [
             ("insert_above", "在此轮上方插入新轮"),

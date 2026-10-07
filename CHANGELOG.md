@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-07
+
+### Changed
+- **Conversation view rebuilt like the major LLM chat UIs** (Claude / ChatGPT /
+  Codex / open-webui):
+  - Tool calls and their results merge into single slim "⚡ Tool — args"
+    activity rows (expandable: pretty-printed args + truncated result,
+    full text on double-click) — timelines shrink ~26% on tool-heavy sessions
+  - Tool-only assistant turns lose the bubble chrome (slim rows), collapsible
+    blocks now carry content previews ("💭 思考过程 — 先检查 token…",
+    "🔧 Read — auth.py"), code blocks get a copy button
+  - Deleting an activity row removes both the call and its paired result
+    through the standard diff-confirm + backup path
+
+### Fixed
+- Tool results no longer show "?" — adapters resolve the real tool name back
+  from call ids (kimi-code, claude-code, codex)
+- Cross-tool raw round-trip restricted to same-tool blocks
+
 ## [0.6.2] - 2026-10-07
 
 ### Changed

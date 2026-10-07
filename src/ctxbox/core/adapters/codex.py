@@ -127,6 +127,7 @@ class CodexAdapter(BaseAdapter):
     def parse(self, path: Path) -> Session:
         result = read_jsonl_tolerant(path)
         meta_payload: dict[str, Any] = {}
+        call_names: dict[str, str] = {}  # call_id -> 工具名 (回填 output 块)
         turns: list[Turn] = []
         skipped = 0
         for line in result.lines:
@@ -145,10 +146,19 @@ class CodexAdapter(BaseAdapter):
             if obj.get("type") == "session_meta":
                 meta_payload = payload
                 continue
+            ptype = payload.get("type")
+            if ptype in _TOOL_CALL_TYPES:
+                cid, name = payload.get("call_id"), payload.get("name") or ptype
+                if cid:
+                    call_names[str(cid)] = str(name)
             turn = _payload_to_turn(payload, ts, obj)
             if turn is None:
                 skipped += 1
                 continue
+            # function_call_output 回填真实工具名 (不再显示 '?')
+            for p in turn.parts:
+                if p.kind == "tool_result" and not p.tool_name:
+                    p.tool_name = call_names.get(str(payload.get("call_id") or ""))
             turns.append(turn)
         session_id = str(meta_payload.get("session_id") or path.stem)
         warnings = list(result.warnings)

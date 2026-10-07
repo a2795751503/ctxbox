@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ctxbox"
-version = "0.6.2"
+version = "0.7.0"
 description = "Open-source local manager for all your AI coding assistant contexts: scan, search, edit, copy and inject conversations across Claude Code, Codex, Cursor, Continue and more."
 readme = "README.md"
 license = { text = "MIT" }

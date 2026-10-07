@@ -117,6 +117,7 @@ class ClaudeCodeAdapter(BaseAdapter):
     def parse(self, path: Path) -> Session:
         result = read_jsonl_tolerant(path)
         session_id = path.stem
+        call_names: dict[str, str] = {}  # tool_use id -> 工具名
         turns: list[Turn] = []
         title = ""
         skipped = 0
@@ -141,11 +142,18 @@ class ClaudeCodeAdapter(BaseAdapter):
             msg = as_dict(obj.get("message"))
             role = _ROLE_MAP.get(msg.get("role") or ltype, Role.UNKNOWN)
             usage = as_dict(msg.get("usage"))
+            parts = _content_to_parts(msg.get("content"), obj)
+            # tool_use id -> 工具名, 回填 tool_result 的名字 (不再显示 id/'?')
+            for p in parts:
+                if p.kind == "tool_call" and p.raw and p.raw.get("id") and p.tool_name:
+                    call_names[str(p.raw["id"])] = str(p.tool_name)
+                elif p.kind == "tool_result" and p.tool_name:
+                    p.tool_name = call_names.get(p.tool_name, p.tool_name)
             turns.append(
                 Turn(
                     id=str(obj.get("uuid", "")),
                     role=role,
-                    parts=_content_to_parts(msg.get("content"), obj),
+                    parts=parts,
                     timestamp=_parse_ts(obj.get("timestamp")),
                     model=msg.get("model") if isinstance(msg.get("model"), str) else None,
                     tokens_in=usage.get("input_tokens"),

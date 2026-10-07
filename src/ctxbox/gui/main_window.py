@@ -796,6 +796,24 @@ class MainWindow(QMainWindow):
                 QApplication.clipboard().setText(turn.text())
                 self.statusBar().showMessage("已复制该轮文本", 4000)
             return
+        if action == "delete_pair":
+            # 工具活动行: 删除调用轮 + 配对的结果轮
+            call_id, _, result_id = turn_id.partition("|")
+            call_turn = s.get_turn(call_id)
+            preview = (call_turn.text() or "")[:60] if call_turn else ""
+            ret = QMessageBox.question(
+                self,
+                "删除工具调用",
+                f"确定删除该工具调用及其结果吗?\n{preview}…\n\n(保存前会自动备份源文件)",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if ret == QMessageBox.StandardButton.Yes:
+                s.delete_turn(call_id)
+                if result_id:
+                    s.delete_turn(result_id)
+                self._save_and_reload("删除工具调用及其结果")
+            return
 
         idx = self._turn_index(turn_id)
 
