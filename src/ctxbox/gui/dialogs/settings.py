@@ -12,14 +12,26 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
 )
 
+from ctxbox.core.ai_client import PROMPT_LABELS, PROMPTS
 from ctxbox.core.utils.paths import ctxbox_data_dir
 
+from ..ai_support import (
+    DEFAULT_BASE_URL,
+    DEFAULT_MODEL,
+    AiWorker,
+    load_ai_config,
+    save_ai_config,
+    start_ai_job,
+)
 from ..theme import apply_theme, current_theme, tokens
 
 THEMES = [("dark", "深色 (VSCode Dark+)"), ("light", "浅色 (VSCode Light+)")]
@@ -31,7 +43,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None, on_theme_changed=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("设置")
-        self.resize(540, 480)
+        self.resize(620, 780)
         self._on_theme_changed = on_theme_changed
         t = tokens()
         lay = QVBoxLayout(self)
@@ -80,6 +92,59 @@ class SettingsDialog(QDialog):
 
         lay.addLayout(form)
 
+        # ---------------------------- AI 服务 ----------------------------
+        ai_group = QGroupBox("AI 服务")
+        ai_form = QFormLayout(ai_group)
+
+        st = QSettings("ctxbox", "ctxbox")
+        self.ai_base_url = QLineEdit(str(st.value("ai_base_url", DEFAULT_BASE_URL)))
+        ai_form.addRow("Base URL", self.ai_base_url)
+        self.ai_key = QLineEdit(str(st.value("ai_key", "")))
+        self.ai_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ai_key.setPlaceholderText("仅存储在本机 QSettings")
+        ai_form.addRow("API Key", self.ai_key)
+        self.ai_model = QLineEdit(str(st.value("ai_model", DEFAULT_MODEL)))
+        ai_form.addRow("Model", self.ai_model)
+
+        test_row = QHBoxLayout()
+        self.btn_ai_test = QPushButton("测试连接")
+        self.btn_ai_test.setProperty("kind", "secondary")
+        self.btn_ai_test.clicked.connect(self._test_ai)
+        test_row.addWidget(self.btn_ai_test)
+        self.ai_test_result = QLabel("")
+        self.ai_test_result.setWordWrap(True)
+        test_row.addWidget(self.ai_test_result, 1)
+        ai_form.addRow("", test_row)
+
+        for edit in (self.ai_base_url, self.ai_key, self.ai_model):
+            edit.editingFinished.connect(self._save_ai_fields)
+
+        ai_note = QLabel(
+            "AI 服务为 ctxbox 唯一的联网功能，仅在你配置后、且只对预览确认的内容发送。"
+            "Key 仅存储在本机。"
+        )
+        ai_note.setWordWrap(True)
+        ai_note.setStyleSheet(f"color: {t['text_muted']}; font-size: 12px;")
+        ai_form.addRow("", ai_note)
+
+        # 提示词查看
+        prompt_row = QHBoxLayout()
+        prompt_row.addWidget(QLabel("提示词"))
+        self.prompt_combo = QComboBox()
+        for key, label in PROMPT_LABELS.items():
+            self.prompt_combo.addItem(label, key)
+        prompt_row.addWidget(self.prompt_combo, 1)
+        ai_form.addRow("", prompt_row)
+        self.prompt_view = QPlainTextEdit()
+        self.prompt_view.setReadOnly(True)
+        self.prompt_view.setMaximumHeight(110)
+        self.prompt_view.setStyleSheet("font-size: 12px;")
+        self.prompt_combo.currentIndexChanged.connect(self._show_prompt)
+        self._show_prompt()
+        ai_form.addRow("", self.prompt_view)
+
+        lay.addWidget(ai_group)
+
         # 快捷键一览 (静态展示)
         t_keys = tokens()
         group_title = QLabel("快捷键")
@@ -126,6 +191,43 @@ class SettingsDialog(QDialog):
         apply_theme(app, self.theme.currentData())
         if callable(self._on_theme_changed):
             self._on_theme_changed()
+
+    # ------------------------------------------------------------- AI --
+    def _save_ai_fields(self) -> None:
+        save_ai_config(self.ai_base_url.text(), self.ai_key.text(), self.ai_model.text())
+
+    def _show_prompt(self) -> None:
+        key = self.prompt_combo.currentData()
+        self.prompt_view.setPlainText(PROMPTS.get(key, ""))
+
+    def _test_ai(self) -> None:
+        self._save_ai_fields()  # 先持久化当前表单再测
+        cfg = load_ai_config()
+        if not cfg.enabled:
+            self.ai_test_result.setStyleSheet(f"color: {tokens()['danger']};")
+            self.ai_test_result.setText("请先填写 API Key")
+            return
+        self.btn_ai_test.setEnabled(False)
+        self.btn_ai_test.setText("测试中…")
+        self.ai_test_result.setStyleSheet(f"color: {tokens()['text_secondary']};")
+        self.ai_test_result.setText("")
+
+        def _done(result: str) -> None:
+            self._ai_test_done()
+            self.ai_test_result.setStyleSheet(f"color: {tokens()['success']};")
+            self.ai_test_result.setText(f"✓ 连接成功: {result}")
+
+        def _failed(detail: str) -> None:
+            self._ai_test_done()
+            self.ai_test_result.setStyleSheet(f"color: {tokens()['danger']};")
+            self.ai_test_result.setText(f"✗ {detail}")
+
+        worker = AiWorker(cfg, mode="test")
+        start_ai_job(self, worker, _done, _failed)
+
+    def _ai_test_done(self) -> None:
+        self.btn_ai_test.setEnabled(True)
+        self.btn_ai_test.setText("测试连接")
 
     @staticmethod
     def _open_dir(path: str) -> None:

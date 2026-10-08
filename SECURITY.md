@@ -9,13 +9,24 @@
 
 ## Privacy model / 隐私模型
 
-ctxbox is **local-first and offline**: it reads AI tool session files on your
+ctxbox is **local-first and offline by default**: it reads AI tool session files on your
 machine, builds a local SQLite index, and never sends your data anywhere.
 There are no accounts, no telemetry, no analytics, no update checks that
 carry user content.
 
+**One opt-in exception**: the AI-assist features ("✨ AI 优化", v0.8+)
+call an OpenAI-compatible `/chat/completions` endpoint that **you configure
+yourself** (Base URL + API Key + Model in Settings). It is disabled until you
+configure it, sends only the specific content shown in the send-preview
+dialog you confirm, and your key is stored only on your machine (QSettings,
+never in the repository or logs).
+
 ctxbox 完全离线运行：只读取本机 AI 工具的会话文件、建立本地索引，
 不会携带你的任何数据发起网络请求。无账号、无遥测、无分析。
+
+**唯一的可选例外**：v0.8 的「✨ AI 优化」功能会调用**你自己配置**的
+OpenAI 兼容端点。未配置时完全禁用；每次发送前都有预览确认框，只发送
+你确认的那段内容；Key 只存在你自己电脑上。
 
 ## Write safety / 写入安全
 

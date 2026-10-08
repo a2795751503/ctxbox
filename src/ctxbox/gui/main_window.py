@@ -37,6 +37,7 @@ from ctxbox.core.utils.paths import ctxbox_data_dir
 
 from ._compat import SessionIndex, export_session
 from .dialogs.diff_confirm import confirm_save
+from .dialogs.exchange_editor import ExchangeEditorDialog
 from .dialogs.inject_wizard import InjectWizard
 from .dialogs.settings import SettingsDialog
 from .dialogs.snapshots import SnapshotsDialog
@@ -845,10 +846,13 @@ class MainWindow(QMainWindow):
     def _save_and_reload(
         self, op_desc: str = "修改会话", focus_turn_index: int | None = None
     ) -> bool:
-        sid = self.current_session.id
         saved = self._save_session(op_desc)
-        # 保存与取消都走后台全量重解析 (数据正确性优先), 渲染是 200 节点窗口
-        self._start_load(session_id=sid, focus_turn_index=focus_turn_index)
+        # 保存与取消都直接重解析刚写入的文件 (不依赖索引可见性:
+        # 快照文件/未入库会话同样能正确重载; 后台线程 + 200 节点窗口)
+        s = self.current_session
+        self._start_load(
+            file_path=str(s.source_path), tool=s.source_tool, focus_turn_index=focus_turn_index
+        )
         if saved:
             self.refresh()  # 轮数/时间可能变化
         return saved
@@ -880,18 +884,87 @@ class MainWindow(QMainWindow):
         s = self.current_session
         if s is None:
             return
-        turn = s.get_turn(turn_id)
-        if turn is None:
+        # 定位所属 Exchange (一问一答为一个编辑单元)
+        from ctxbox.core.exchange import group_exchanges
+
+        exchanges = group_exchanges(s.turns)
+        target = None
+        for ex in exchanges:
+            if (ex.input is not None and ex.input.id == turn_id) or any(
+                t.id == turn_id for t in ex.output
+            ):
+                target = ex
+                break
+        if target is None:
+            self.statusBar().showMessage("该轮不在任何问答对中, 无法编辑", 4000)
             return
-        dlg = TurnEditorDialog(turn, self)
+        dlg = ExchangeEditorDialog(target, on_apply_title=self.apply_session_title, parent=self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
+        input_text, output_text = dlg.result_texts()
         try:
-            edit_idx = self._turn_index(turn_id)
-            dlg.apply_to(turn)  # 就地修改 + meta["_edited"]=True
-            self._save_and_reload(f"编辑第 {edit_idx + 1} 轮", focus_turn_index=edit_idx)
+            self._apply_exchange_edit(s, target, input_text, output_text)
+            focus = None
+            if target.input is not None and target.input in s.turns:
+                focus = s.turns.index(target.input)
+            elif target.output:
+                focus = s.turns.index(target.output[0])
+            self._save_and_reload(f"编辑第 {target.index} 轮", focus_turn_index=focus)
         except Exception as exc:  # noqa: BLE001
             self._error("保存失败", exc)
+
+    @staticmethod
+    def _apply_exchange_edit(s: Session, exchange, input_text: str, output_text: str) -> None:
+        """把编辑器结果写回 Exchange: 只动 text parts, thinking/tool 一律保留。"""
+        # 输入轮: 第一个 text part 替换, 其余 text part 删除; 没有就新建
+        if exchange.input is not None:
+            turn = exchange.input
+            text_parts = [p for p in turn.parts if p.kind == "text"]
+            if text_parts:
+                text_parts[0].text = input_text
+                text_parts[0].raw = None  # 已编辑: 不再原样回写旧块
+                for p in text_parts[1:]:
+                    turn.parts.remove(p)
+            else:
+                turn.parts.append(ContentPart(kind="text", text=input_text))
+            turn.meta["_edited"] = True
+
+        # 输出: 该 Exchange 内第一个 assistant text part 替换, 其余删除
+        first: tuple | None = None
+        for t in exchange.output:
+            if t.role != Role.ASSISTANT:
+                continue
+            for p in t.parts:
+                if p.kind == "text":
+                    first = (t, p)
+                    break
+            if first:
+                break
+        if first is not None:
+            t0, p0 = first
+            p0.text = output_text
+            p0.raw = None
+            t0.meta["_edited"] = True
+            for t in exchange.output:
+                if t.role != Role.ASSISTANT:
+                    continue
+                for p in list(t.parts):
+                    if p.kind == "text" and p is not p0:
+                        t.parts.remove(p)
+                        t.meta["_edited"] = True
+        else:
+            # 输出原本没有任何 text part: 在最后一个 assistant 轮新建
+            assistants = [t for t in exchange.output if t.role == Role.ASSISTANT]
+            if assistants and output_text.strip():
+                assistants[-1].parts.append(ContentPart(kind="text", text=output_text))
+                assistants[-1].meta["_edited"] = True
+
+    def apply_session_title(self, title: str) -> None:
+        """AI 生成标题后应用到当前会话并写回 (序列化器支持的格式会持久化)。"""
+        if self.current_session is None or not title.strip():
+            return
+        self.current_session.title = title.strip()
+        self._save_and_reload("AI 生成标题")
 
     def _on_turn_action(self, action: str, turn_id: str) -> None:
         s = self.current_session

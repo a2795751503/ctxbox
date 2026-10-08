@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-10-07
+
+### Added
+- **Exchange-level editing**: a "round" is now a real Q&A pair (user input +
+  all assistant output incl. thinking/tool activity), not a single message.
+  The editor shows input and output separately; thinking and tool calls are
+  preserved untouched on save
+- **AI assist (opt-in)**: configure any OpenAI-compatible endpoint in
+  Settings → AI 服务, then "✨ AI 优化" in the editor: optimize the question,
+  optimize the answer, generate a title, or compress tool output. Four
+  Chinese-first prompt templates ship editable. Every send is previewed and
+  confirmed; keys stay on your machine — this is ctxbox's only network
+  feature and it's disabled until you configure it
+- `core/exchange.py` (`group_exchanges`) and `core/ai_client.py` (urllib-only
+  `/chat/completions` client) with full tests
+
+### Fixed
+- Saving a session opened via the snapshot viewer now reloads the same file
+  (was: "加载会话失败")
+
 ## [0.7.0] - 2026-10-07
 
 ### Changed
