@@ -389,8 +389,14 @@ class SlimResultBlock(QFrame):
     def __init__(self, turn: Turn, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         t = tokens()
+        self.setObjectName("slimResultBlock")
+        self.setStyleSheet(
+            f"#slimResultBlock {{ background: {t['card']};"
+            f" border: 1px solid {t['border']}; border-radius: 8px;"
+            f" border-left: 3px solid {t['accent_soft_border']}; }}"
+        )
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(18, 0, 0, 0)
+        lay.setContentsMargins(10, 4, 10, 6)
         lay.setSpacing(3)
 
         bits = ["工具"]
@@ -616,6 +622,21 @@ class TimelineWidget(QListWidget):
     # ------------------------------------------------------------ 行构建 --
     def _build_row(self, node: RenderNode) -> tuple[QWidget, tuple]:
         """把一个渲染节点构建成 (行 widget, item 标记), 不加入列表。"""
+        turn = node.turn
+        # Claude 风格: 只含工具结果的"用户"轮不渲染成大蓝气泡,
+        # 而是低调的工具行 (Claude.ai/Claude Code 同款)
+        if (
+            turn.role == Role.USER
+            and turn.parts
+            and all(p.kind == "tool_result" for p in turn.parts)
+        ):
+            block = SlimResultBlock(turn)
+            row = QWidget()
+            hl = QHBoxLayout(row)
+            hl.setContentsMargins(6, 0, 6, 0)
+            hl.addWidget(block, 3)
+            hl.addStretch(1)
+            return row, ("turn", turn.id)
         if node.slim and node.activities:
             block = SlimActivityBlock(node)
             row = QWidget()
@@ -623,7 +644,7 @@ class TimelineWidget(QListWidget):
             hl.setContentsMargins(6, 0, 6, 0)
             hl.addWidget(block, 3)
             hl.addStretch(1)
-            return row, ("turn", node.turn.id)
+            return row, ("turn", turn.id)
         if node.slim:
             block = SlimResultBlock(node.turn)
             row = QWidget()
@@ -631,8 +652,7 @@ class TimelineWidget(QListWidget):
             hl.setContentsMargins(6, 0, 6, 0)
             hl.addWidget(block, 3)
             hl.addStretch(1)
-            return row, ("turn", node.turn.id)
-        turn = node.turn
+            return row, ("turn", turn.id)
         display = turn
         if node.activities:
             # text/thinking 留在气泡, tool_call 已抽成活动行

@@ -181,8 +181,9 @@ class ToolActivityRow(QFrame):
         t = tokens()
         self.setObjectName("toolActivityRow")
         self.setStyleSheet(
-            f"#toolActivityRow {{ background: {t['bubble_tool_bg']};"
-            f" border: 1px solid {t['border']}; border-radius: 6px; }}"
+            f"#toolActivityRow {{ background: {t['card']};"
+            f" border: 1px solid {t['border']}; border-radius: 8px;"
+            f" border-left: 3px solid {t['accent_soft_border']}; }}"
         )
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 3, 8, 3)
