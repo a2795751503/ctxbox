@@ -667,8 +667,8 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def _delete_context_file(self, session_id: str) -> None:
-        """删除上下文: 连源文件一起删——但先把每个文件备份进 ctxbox 回收站
-        (~/.ctxbox/backups 或平台数据目录), 可恢复, 符合'绝不丢数据'铁律。"""
+        """删除上下文: 连源文件一起删。默认放入系统回收站(可还原);
+        用户取消勾选则永久删除。"""
         row = next((r for r in self._all_rows if r["id"] == session_id), None)
         if row is None:
             return
@@ -686,25 +686,44 @@ class MainWindow(QMainWindow):
         box.setWindowTitle("删除上下文")
         box.setIcon(QMessageBox.Icon.Warning)
         box.setText(
-            f"确定删除「{title}」的上下文文件吗?\n\n"
-            f"将删除 {snapshots} 个源文件(含全部快照)。\n"
-            "删除前会自动备份到 ctxbox 回收站, 需要时可从备份目录恢复。"
+            f"确定删除「{title}」的上下文文件吗?\n\n将删除 {snapshots} 个源文件(含全部快照)。"
         )
+        from PySide6.QtWidgets import QCheckBox
+
+        chk = QCheckBox("放入系统回收站(可还原)")
+        chk.setChecked(True)
+        box.setCheckBox(chk)
         box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.No)
         if box.exec() != QMessageBox.StandardButton.Yes:
             return
+        use_bin = chk.isChecked()
+        if not use_bin:
+            # 永久删除, 二次确认
+            ret = QMessageBox.warning(
+                self,
+                "永久删除",
+                f"未选择回收站, {snapshots} 个文件将被永久删除, 无法还原!\n确定继续吗?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if ret != QMessageBox.StandardButton.Yes:
+                return
         from pathlib import Path
 
-        deleted, backup_dir = 0, None
+        from ctxbox.core.utils import move_to_recycle_bin
+
+        deleted, note = 0, ""
         for f in files:
             p = Path(f)
             if not p.exists():
                 continue
-            backup = idx.backup_file(p)
-            backup_dir = backup.parent
             try:
-                p.unlink()
+                if use_bin:
+                    note = move_to_recycle_bin(p)
+                else:
+                    p.unlink()
+                    note = "永久删除"
                 deleted += 1
             except OSError as exc:
                 self._error("删除失败", f"{p}\n{exc}\n(文件可能被对应工具占用, 请先关闭)")
@@ -713,7 +732,8 @@ class MainWindow(QMainWindow):
         if self.current_session and self.current_session.id == session_id:
             self.current_session = None
             self.right_stack.setCurrentWidget(self.dashboard)
-        self.statusBar().showMessage(f"已删除 {deleted} 个上下文文件 · 备份在 {backup_dir}", 8000)
+        tail = f"已放入{note}" if use_bin else "已永久删除"
+        self.statusBar().showMessage(f"已删除 {deleted} 个上下文文件 · {tail}", 8000)
         self.refresh()
 
     def _export_session(self, session_id: str, md_only: bool = False) -> None:
