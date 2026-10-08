@@ -54,8 +54,22 @@ class TargetPage(QWizardPage):
 
         self.adapters = [a for a in all_adapters() if "inject" in a.supported_features()]
         self.listw = QListWidget()
+        from ..theme import TOOL_ICONS, tokens
+
+        t = tokens()
+        # 卡片化列表: 选中 = 浅蓝底 + 蓝边 + 深色字 (主题一致, 杜绝白字浅底)
+        self.listw.setSpacing(6)
+        self.listw.setStyleSheet(
+            f"QListWidget {{ background: transparent; border: none; padding: 2px; }}"
+            f"QListWidget::item {{ background: {t['card']}; color: {t['text']};"
+            f" border: 1px solid {t['border']}; border-radius: 10px; padding: 12px 14px; }}"
+            f"QListWidget::item:hover {{ border-color: {t['accent_soft_border']}; }}"
+            f"QListWidget::item:selected {{ background: {t['accent_soft']};"
+            f" border: 2px solid {t['accent_soft_border']}; color: {t['text']}; }}"
+        )
         for a in self.adapters:
-            item = QListWidgetItem(f"{a.display_name}  ({a.name})")
+            icon = TOOL_ICONS.get(a.name, "🔧")
+            item = QListWidgetItem(f"{icon}  {a.display_name}\n     {a.name}")
             item.setData(0x0100, a.name)  # Qt.UserRole
             self.listw.addItem(item)
         if self.adapters:
