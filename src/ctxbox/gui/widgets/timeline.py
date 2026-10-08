@@ -363,7 +363,7 @@ class SlimActivityBlock(_ActivityForwarder, QFrame):
         self.node = node
         t = tokens()
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(18, 0, 0, 0)
+        lay.setContentsMargins(0, 4, 0, 0)  # 左缘与气泡卡对齐到同一条线
         lay.setSpacing(3)
 
         turn = node.turn
@@ -373,7 +373,7 @@ class SlimActivityBlock(_ActivityForwarder, QFrame):
         if turn.model:
             bits.append(turn.model)
         header = QLabel(" · ".join(bits))
-        header.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px;")
+        header.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px; padding-left: 4px;")
         lay.addWidget(header)
 
         for act in node.activities:
@@ -396,14 +396,14 @@ class SlimResultBlock(QFrame):
             f" border-left: 3px solid {t['accent_soft_border']}; }}"
         )
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 4, 10, 6)
+        lay.setContentsMargins(0, 4, 0, 6)  # 左缘与气泡卡对齐到同一条线
         lay.setSpacing(3)
 
         bits = ["工具"]
         if turn.timestamp:
             bits.append(turn.timestamp.strftime("%H:%M:%S"))
         header = QLabel(" · ".join(bits))
-        header.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px;")
+        header.setStyleSheet(f"color: {t['text_muted']}; font-size: 11px; padding-left: 4px;")
         lay.addWidget(header)
 
         for part in turn.parts:
