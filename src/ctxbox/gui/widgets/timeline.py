@@ -85,21 +85,45 @@ def _text_label(text: str, color: str = "", size: int = 13) -> QLabel:
 
 
 class Collapsible(QFrame):
-    """可折叠区块: 标题按钮 + 正文, 默认折叠。"""
+    """可折叠区块: 标题按钮 + 正文, 默认折叠。
 
-    def __init__(self, title: str, content: QWidget, parent: QWidget | None = None) -> None:
+    well=True 时正文包一层"内容井"底色 (well_bg/well_border/well_text),
+    颜色由调用方按气泡深浅传入, 杜绝气泡里白底白字/深底深字。
+    """
+
+    def __init__(
+        self,
+        title: str,
+        content: QWidget,
+        parent: QWidget | None = None,
+        *,
+        well_bg: str = "",
+        well_border: str = "",
+        well_text: str = "",
+        btn_color: str = "",
+    ) -> None:
         super().__init__(parent)
         t = tokens()
+        # 折叠块自身透明, 露出所属气泡的底色 (否则浅色全局底会盖住蓝气泡)
+        self.setStyleSheet("Collapsible { background: transparent; border: none; }")
         self.btn = QToolButton()
         self.btn.setText(f"▶ {title}")
         self.btn.setCheckable(True)
         self.btn.setChecked(False)
         self.btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.btn.setStyleSheet(
-            f"QToolButton {{ color: {t['text_secondary']}; border: none;"
+            f"QToolButton {{ color: {btn_color or t['text_secondary']}; border: none;"
             " padding: 2px; font-size: 12px; }"
         )
         self.content = content
+        if well_bg:
+            # 内容井: 显式底/边/字三色, 与所属气泡成深浅对比
+            # (合并到内容已有样式上, 保留字体/字号设置)
+            self.content.setStyleSheet(
+                self.content.styleSheet()
+                + f" background: {well_bg}; border: 1px solid {well_border};"
+                f" border-radius: 6px; padding: 8px; color: {well_text};"
+            )
         self.content.setVisible(False)
         self.btn.toggled.connect(self._toggle)
 
@@ -222,6 +246,11 @@ class TurnBubble(_ActivityForwarder, QFrame):
             )
             self._text_color = t["bubble_assistant_text"]
             header_color = t["text_muted"]
+        # 内容井配色: 用户蓝气泡用深蓝井, 其余浅色/深色卡用对应井色
+        if turn.role == Role.USER:
+            self._well = (t["well_user_bg"], t["well_user_border"], t["well_user_text"])
+        else:
+            self._well = (t["well_bg"], t["well_border"], t["well_text"])
         # 气泡级兜底颜色: 即使某个子标签忘了设色, 也继承到与背景相配的前景色,
         # 杜绝任何"白底白字/黑底黑字"组合
         self.setStyleSheet(f"TurnBubble {{ {style} color: {self._text_color}; }}")
@@ -241,7 +270,7 @@ class TurnBubble(_ActivityForwarder, QFrame):
             for part in turn.parts:
                 inner_lay.addWidget(self._render_part(part))
             preview = text_preview(turn.text() or "")
-            lay.addWidget(Collapsible(f"⚙️ 环境/系统上下文 — {preview}", inner))
+            lay.addWidget(self._well_collapsible(f"⚙️ 环境/系统上下文 — {preview}", inner))
             return
 
         for part in turn.parts:
@@ -270,21 +299,33 @@ class TurnBubble(_ActivityForwarder, QFrame):
         header.setStyleSheet(f"color: {color}; font-size: 11px;")
         return header
 
+    def _well_collapsible(self, title: str, content: QWidget) -> Collapsible:
+        """折叠块带"内容井"配色: 井底/井边/井字与所属气泡成深浅对比。"""
+        bg, border, text = self._well
+        return Collapsible(
+            title,
+            content,
+            well_bg=bg,
+            well_border=border,
+            well_text=text,
+            btn_color=text,
+        )
+
     def _render_part(self, part) -> QWidget:
         t = tokens()
         kind, text = part.kind, part.text or ""
         if kind == "thinking":
             title = f"💭 思考过程 — {text_preview(text)}" if text.strip() else "💭 思考过程"
-            return Collapsible(title, _text_label(text, color=self._text_color, size=12))
+            return self._well_collapsible(title, _text_label(text, color=self._well[2], size=12))
         if kind == "tool_call":  # 噪音轮内等未抽出的调用
-            return Collapsible(
+            return self._well_collapsible(
                 f"🔧 {tool_label(part)} — {arg_summary(part)}",
-                _mono_label(text or "(无内容)", color=self._text_color),
+                _mono_label(text or "(无内容)", color=self._well[2]),
             )
         if kind == "tool_result":
-            return Collapsible(
+            return self._well_collapsible(
                 f"📥 {tool_label(part)} ✓",
-                _mono_label(text or "(无内容)", color=self._text_color),
+                _mono_label(text or "(无内容)", color=self._well[2]),
             )
         if kind == "code":
             return CodeBlock(text)

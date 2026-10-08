@@ -34,6 +34,8 @@ PAIRS = [
     ("bubble_assistant_text", "bubble_assistant_bg", 4.5),
     ("bubble_tool_text", "bubble_tool_bg", 4.5),
     ("code_text", "code_bg", 4.5),
+    ("well_text", "well_bg", 4.5),
+    ("well_user_text", "well_user_bg", 4.5),
     ("raw_text", "raw_bg", 4.5),
     ("text", "menu_bg", 4.5),
     ("text", "accent_soft", 4.5),
