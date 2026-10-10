@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-10-08
+
+### Fixed
+- **UI no longer freezes during scan**: the index DB had silently corrupted
+  (malformed image, 301MB) making every query crawl; the dashboard's token
+  sampler also re-parsed the 30 newest sessions (minutes of CPU) after every
+  refresh. Measured after fix: full scan 12.5s → 0.9s, worst UI stall
+  5.8s → 0.7s
+- **Self-healing corrupt index**: SessionIndex detects a damaged index.db at
+  open (cheap probe, not a full quick_check), backs it up as
+  `index.db.bak-corrupt-*` and rebuilds from scratch — the index is a cache,
+  no user data is lost
+- **Token estimate cache**: new `token_cache` table keyed by
+  (session, source mtime); dashboard sampling reuses it, so only changed
+  sessions are re-parsed
+- Scan progress signals are throttled to 10/s and both scanner and token
+  sampler yield the GIL periodically, keeping the UI responsive under load
+
+### Packaging
+- Fixed the packaged exe scanning 0 sessions: adapters are discovered via
+  `importlib` at runtime, which PyInstaller's static analysis can't see;
+  the build now uses `--collect-submodules ctxbox` so all 9 adapters ship
+
 ## [0.9.0] - 2026-10-08
 
 ### Added

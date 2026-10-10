@@ -46,6 +46,9 @@ class TokenStatsWorker(QObject):
         self.limit = limit
 
     def run(self) -> None:
+        import time
+        from pathlib import Path
+
         from ctxbox.core.surgery import session_tokens
 
         idx = None
@@ -54,13 +57,24 @@ class TokenStatsWorker(QObject):
             rows = sorted(idx.sessions(), key=_sort_key, reverse=True)[: self.limit]
             total = 0
             scored: list[tuple[int, dict]] = []
-            for row in rows:
+            for i, row in enumerate(rows):
                 try:
-                    n = session_tokens(idx.load_session(row["id"]))
+                    key = f"{row['source_tool']}::{row['id']}::{row.get('source_path') or ''}"
+                    mtime = (
+                        Path(row["source_path"]).stat().st_mtime
+                        if row.get("source_path") and Path(row["source_path"]).exists()
+                        else 0.0
+                    )
+                    n = idx.cached_tokens(key, mtime)
+                    if n is None:
+                        n = session_tokens(idx.load_session(row["id"]))
+                        idx.cache_tokens(key, mtime, n)
                 except Exception:  # noqa: BLE001 - 单个文件坏了不拖垮整体
                     continue
                 total += n
                 scored.append((n, row))
+                if i % 3 == 0:
+                    time.sleep(0)  # 让出 GIL, 采样期间 UI 保持响应
             self.done.emit(total, scored)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(str(exc))

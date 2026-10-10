@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,11 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
     session_key UNINDEXED, role, text, grams, tokenize='unicode61'
 );
+CREATE TABLE IF NOT EXISTS token_cache (
+    session_key TEXT PRIMARY KEY,  -- tool::id::path
+    source_mtime REAL,
+    tokens INTEGER
+);
 """
 
 
@@ -59,12 +65,41 @@ class SessionIndex:
     def __init__(self, db_path: Path | None = None) -> None:
         db_path = db_path or (ctxbox_data_dir() / "index.db")
         db_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.db = sqlite3.connect(str(db_path))
+            self.db.row_factory = sqlite3.Row
+            # 坏库防御: 进程被杀/断电可能留下损坏的索引; 它只是缓存, 重建即可。
+            # 不开 quick_check (300MB 库要 5s) — executescript 建表 + 探针查询
+            # 已足以检出我们实际遇到的损坏形态 (page0/头损坏在读写时即抛错)。
+            self.db.executescript(_SCHEMA)
+            self.db.execute("PRAGMA journal_mode=WAL")
+            self.db.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()
+        except sqlite3.DatabaseError:
+            self._recover_corrupt(db_path)
+        self._migrate_schema()
+        self._migrate_fts()
+
+    def _recover_corrupt(self, db_path: Path) -> None:
+        """Back up the corrupt index and start fresh (it's a rebuildable
+        cache) instead of crashing or hanging the whole app."""
+        import contextlib
+        import shutil
+        import time as _time
+
+        with contextlib.suppress(Exception):
+            self.db.close()
+        bak = db_path.with_suffix(f".db.bak-corrupt-{int(_time.time())}")
+        for suffix in ("", "-wal", "-shm"):
+            p = Path(str(db_path) + suffix)
+            if p.exists():
+                if suffix == "":
+                    shutil.move(str(p), bak)
+                else:
+                    p.unlink()
         self.db = sqlite3.connect(str(db_path))
         self.db.row_factory = sqlite3.Row
         self.db.executescript(_SCHEMA)
         self.db.execute("PRAGMA journal_mode=WAL")
-        self._migrate_schema()
-        self._migrate_fts()
 
     def _migrate_schema(self) -> None:
         """v0.2.x -> v0.3.0: sessions PK gained `id` (multi-session files like
@@ -100,6 +135,23 @@ class SessionIndex:
     def close(self) -> None:
         self.db.close()
 
+    # ---- token estimate cache (dashboard sampling must not reparse everything) ----
+
+    def cached_tokens(self, key: str, mtime: float) -> int | None:
+        """Return cached token estimate if the source file is unchanged."""
+        row = self.db.execute(
+            "SELECT tokens FROM token_cache WHERE session_key=? AND source_mtime=?",
+            (key, mtime),
+        ).fetchone()
+        return int(row["tokens"]) if row else None
+
+    def cache_tokens(self, key: str, mtime: float, tokens: int) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO token_cache (session_key, source_mtime, tokens) VALUES (?,?,?)",
+            (key, mtime, tokens),
+        )
+        self.db.commit()
+
     # ---- scanning ----
 
     def rescan(
@@ -110,6 +162,7 @@ class SessionIndex:
         """Discover and (re)parse sessions. tool=None scans every adapter;
         pass an adapter name to rescan only that tool's directories."""
         total = 0
+        last_progress = 0.0
         adapters = all_adapters()
         if tool:
             adapters = [a for a in adapters if a.name == tool]
@@ -118,13 +171,17 @@ class SessionIndex:
             for p in ad.detect():
                 files.append((ad.name, p))
         for i, (t, path) in enumerate(files, start=1):
-            if progress_cb:
+            # 进度信号节流: 最多每 100ms 一次, 避免信号洪峰冲击 UI 事件队列
+            if progress_cb and (time.monotonic() - last_progress) >= 0.1:
+                last_progress = time.monotonic()
                 progress_cb(f"{t}: {path.name}", i, len(files))
             try:
                 self._upsert_file(t, path)
                 total += 1
             except Exception as exc:  # a broken file must never kill the scan
                 self._record_error(t, path, str(exc))
+            if i % 10 == 0:
+                time.sleep(0)  # 让出 GIL, 重解析期间 UI 保持响应
         self.prune(tool=tool)
         self.db.commit()
         return total
