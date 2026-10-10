@@ -303,16 +303,37 @@ class SessionIndex:
 
     def remove_session(self, session_id: str, tool: str) -> None:
         """Remove from index only (all snapshots) — source files are never deleted."""
-        rows = self.db.execute(
-            "SELECT source_path FROM sessions WHERE id=? AND source_tool=?", (session_id, tool)
-        ).fetchall()
-        for r in rows:
-            self.db.execute(
-                "DELETE FROM turns_fts WHERE session_key=?",
-                (f"{tool}::{session_id}::{r['source_path']}",),
+        self.remove_sessions_bulk([(tool, session_id)])
+
+    def remove_sessions_bulk(self, pairs: list[tuple[str, str]]) -> int:
+        """Remove many sessions from the index (all snapshots + FTS rows).
+        pairs = [(source_tool, session_id), ...]. Source files untouched.
+        Returns number of session rows removed."""
+        removed = 0
+        for tool, session_id in pairs:
+            rows = self.db.execute(
+                "SELECT source_path FROM sessions WHERE id=? AND source_tool=?", (session_id, tool)
+            ).fetchall()
+            for r in rows:
+                self.db.execute(
+                    "DELETE FROM turns_fts WHERE session_key=?",
+                    (f"{tool}::{session_id}::{r['source_path']}",),
+                )
+            cur = self.db.execute(
+                "DELETE FROM sessions WHERE id=? AND source_tool=?", (session_id, tool)
             )
-        self.db.execute("DELETE FROM sessions WHERE id=? AND source_tool=?", (session_id, tool))
+            removed += cur.rowcount
         self.db.commit()
+        return removed
+
+    def project_files(self, tool: str | None, project_dir: str) -> list[dict[str, Any]]:
+        """All index rows (all snapshots) belonging to one project."""
+        sql = "SELECT * FROM sessions WHERE project_dir=?"
+        params: list[Any] = [project_dir]
+        if tool:
+            sql += " AND source_tool=?"
+            params.append(tool)
+        return [dict(r) for r in self.db.execute(sql, params).fetchall()]
 
     # ---- backups ----
 

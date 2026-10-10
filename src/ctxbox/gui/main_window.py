@@ -251,6 +251,32 @@ class MainWindow(QMainWindow):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
+        # 中栏: 工具条 ([☑ 批量] [🗂 按项目分组]) + 列表
+        center_col = QWidget()
+        center_lay = QVBoxLayout(center_col)
+        center_lay.setContentsMargins(0, 0, 0, 0)
+        center_lay.setSpacing(4)
+
+        self.center_toolbar = QWidget()
+        ctb = QHBoxLayout(self.center_toolbar)
+        ctb.setContentsMargins(8, 2, 8, 2)
+        ctb.setSpacing(8)
+        self.btn_batch = QPushButton("☑ 批量")
+        self.btn_batch.setProperty("kind", "secondary")
+        self.btn_batch.setCheckable(True)
+        self.btn_batch.setToolTip("进入批量勾选模式, 可批量删除会话")
+        self.btn_batch.toggled.connect(self._on_batch_toggled)
+        ctb.addWidget(self.btn_batch)
+        self.btn_group = QPushButton("🗂 按项目分组")
+        self.btn_group.setProperty("kind", "primary")
+        self.btn_group.setCheckable(True)
+        self.btn_group.setChecked(True)
+        self.btn_group.setToolTip("在项目分组视图和平铺列表之间切换")
+        self.btn_group.toggled.connect(self._on_group_toggled)
+        ctb.addWidget(self.btn_group)
+        ctb.addStretch(1)
+        center_lay.addWidget(self.center_toolbar)
+
         self.center_stack = QStackedWidget()
         self.center_empty = self._make_empty(
             "💬", "暂无会话\n\n点击顶部「扫描」发现本机 AI 工具的会话。"
@@ -258,9 +284,13 @@ class MainWindow(QMainWindow):
         self.session_list = SessionListWidget()
         self.session_list.openRequested.connect(self.open_session)
         self.session_list.contextAction.connect(self._on_session_action)
+        self.session_list.projectDeleteRequested.connect(self._delete_project)
+        self.session_list.batchDeleteRequested.connect(self._delete_batch)
+        self.session_list.batchModeChanged.connect(self._sync_batch_button)
         self.center_stack.addWidget(self.center_empty)
         self.center_stack.addWidget(self.session_list)
-        splitter.addWidget(self.center_stack)
+        center_lay.addWidget(self.center_stack, 1)
+        splitter.addWidget(center_col)
 
         self.right_stack = QStackedWidget()
         self.dashboard = DashboardWidget()
@@ -462,6 +492,10 @@ class MainWindow(QMainWindow):
             self._error("搜索失败", exc)
             return
         self._searching = True
+        # 搜索模式强制平铺, 隐藏分组/批量切换
+        self.center_toolbar.hide()
+        if self.btn_batch.isChecked():
+            self.btn_batch.setChecked(False)
         if rows:
             self.session_list.set_rows(rows, search_mode=True)
             self.center_stack.setCurrentWidget(self.session_list)
@@ -476,9 +510,30 @@ class MainWindow(QMainWindow):
 
     def _clear_search(self) -> None:
         self._searching = False
+        self.center_toolbar.show()
         self.center_empty.setText("💬\n\n暂无会话\n\n点击顶部「扫描」发现本机 AI 工具的会话。")
         self._populate_center()
         self.statusBar().showMessage("就绪")
+
+    # ------------------------------------------------------- 中栏工具条 --
+    def _on_batch_toggled(self, checked: bool) -> None:
+        self.session_list.set_batch_mode(checked)
+        self._restyle_toggle(self.btn_batch, checked)
+
+    def _on_group_toggled(self, checked: bool) -> None:
+        self.session_list.set_grouped(checked)
+        self._restyle_toggle(self.btn_group, checked)
+
+    @staticmethod
+    def _restyle_toggle(btn: QPushButton, active: bool) -> None:
+        btn.setProperty("kind", "primary" if active else "secondary")
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+
+    def _sync_batch_button(self, enabled: bool) -> None:
+        """session_list 内部退出批量 (Esc/✕) 时同步工具条按钮态。"""
+        if self.btn_batch.isChecked() != enabled:
+            self.btn_batch.setChecked(enabled)
 
     # ------------------------------------------------------------- 导航栏 --
     def _on_nav_filter(self, tool: str | None) -> None:
@@ -668,49 +723,90 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def _delete_context_file(self, session_id: str) -> None:
-        """删除上下文: 连源文件一起删。默认放入系统回收站(可还原);
-        用户取消勾选则永久删除。"""
+        """删除上下文: 连源文件一起删 (走共享删除流程)。"""
         row = next((r for r in self._all_rows if r["id"] == session_id), None)
         if row is None:
             return
         title = row.get("title") or session_id
         tool = row.get("source_tool")
         idx = self._require_idx()
-        # 该会话在索引里的全部快照文件
         files = [
             r["source_path"]
             for r in idx.sessions(dedupe=False)
             if r["id"] == session_id and r["source_tool"] == tool and r.get("source_path")
         ]
-        snapshots = len(files)
+        desc = f"确定删除「{title}」的上下文文件吗?"
+        self._delete_files_and_index(files, [(tool, session_id)], desc, clear_current_id=session_id)
+
+    def _delete_project(self, project_dir: str) -> None:
+        """分组头「删除该项目」: 覆盖该项目全部工具的全部快照文件。"""
+        idx = self._require_idx()
+        rows = idx.project_files(None, project_dir)
+        if not rows:
+            self.statusBar().showMessage("该项目在索引中没有文件", 4000)
+            return
+        files = [r["source_path"] for r in rows if r.get("source_path")]
+        pairs = sorted({(r["source_tool"], r["id"]) for r in rows})
+        n_sessions = len({r["id"] for r in rows})
+        name = project_dir.split("/")[-1].split("\\")[-1] or project_dir
+        desc = f"项目「{name}」共有 {n_sessions} 个会话 · {len(files)} 个源文件, 将一并删除"
+        self._delete_files_and_index(files, pairs, desc)
+
+    def _delete_batch(self, pairs: list) -> None:
+        """批量删除选中的会话 (含每个会话的全部快照文件)。"""
+        if not pairs:
+            return
+        idx = self._require_idx()
+        pairset = set(pairs)
+        files = [
+            r["source_path"]
+            for r in idx.sessions(dedupe=False)
+            if (r["source_tool"], r["id"]) in pairset and r.get("source_path")
+        ]
+        desc = f"选中的 {len(pairs)} 个会话 · {len(files)} 个源文件, 将一并删除"
+        if self._delete_files_and_index(files, list(pairset), desc):
+            self.session_list.set_batch_mode(False)  # 成功后退出批量模式
+
+    def _delete_files_and_index(
+        self,
+        files: list[str],
+        pairs: list,
+        subject_desc: str,
+        clear_current_id: str | None = None,
+    ) -> bool:
+        """共享删除流程: 确认(回收站可选) -> 删文件 -> 批量清索引 -> refresh。
+
+        files: 源文件路径列表; pairs: [(source_tool, session_id)] 批量索引删除。
+        被占用报错并中止 (返回 False)。
+        """
+        from pathlib import Path
+
+        from PySide6.QtWidgets import QCheckBox
+
+        idx = self._require_idx()
+        files = list(dict.fromkeys(files))  # 去重保序
         box = QMessageBox(self)
         box.setWindowTitle("删除上下文")
         box.setIcon(QMessageBox.Icon.Warning)
-        box.setText(
-            f"确定删除「{title}」的上下文文件吗?\n\n将删除 {snapshots} 个源文件(含全部快照)。"
-        )
-        from PySide6.QtWidgets import QCheckBox
-
+        box.setText(f"{subject_desc}\n\n将删除 {len(files)} 个源文件(含全部快照)。")
         chk = QCheckBox("放入系统回收站(可还原)")
         chk.setChecked(True)
         box.setCheckBox(chk)
         box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         box.setDefaultButton(QMessageBox.StandardButton.No)
         if box.exec() != QMessageBox.StandardButton.Yes:
-            return
+            return False
         use_bin = chk.isChecked()
         if not use_bin:
-            # 永久删除, 二次确认
             ret = QMessageBox.warning(
                 self,
                 "永久删除",
-                f"未选择回收站, {snapshots} 个文件将被永久删除, 无法还原!\n确定继续吗?",
+                f"未选择回收站, {len(files)} 个文件将被永久删除, 无法还原!\n确定继续吗?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
             if ret != QMessageBox.StandardButton.Yes:
-                return
-        from pathlib import Path
+                return False
 
         from ctxbox.core.utils import move_to_recycle_bin
 
@@ -728,14 +824,34 @@ class MainWindow(QMainWindow):
                 deleted += 1
             except OSError as exc:
                 self._error("删除失败", f"{p}\n{exc}\n(文件可能被对应工具占用, 请先关闭)")
-                return
-        idx.remove_session(session_id, tool)
-        if self.current_session and self.current_session.id == session_id:
+                return False
+
+        removed = idx.remove_sessions_bulk(pairs) if hasattr(idx, "remove_sessions_bulk") else 0
+        if not removed:
+            # 老接口回退: 逐个 remove_session
+            for tool, sid in pairs:
+                try:
+                    idx.remove_session(sid, tool)
+                    removed += 1
+                except Exception:  # noqa: BLE001
+                    pass
+        if (
+            (
+                clear_current_id
+                and self.current_session
+                and self.current_session.id == clear_current_id
+            )
+            or self.current_session
+            and any(sid == self.current_session.id for _tool, sid in pairs)
+        ):
             self.current_session = None
             self.right_stack.setCurrentWidget(self.dashboard)
         tail = f"已放入{note}" if use_bin else "已永久删除"
-        self.statusBar().showMessage(f"已删除 {deleted} 个上下文文件 · {tail}", 8000)
+        self.statusBar().showMessage(
+            f"已删除 {deleted} 个上下文文件 · 索引移除 {removed} 条 · {tail}", 8000
+        )
         self.refresh()
+        return True
 
     def _export_session(self, session_id: str, md_only: bool = False) -> None:
         session = self._require_idx().load_session(session_id)

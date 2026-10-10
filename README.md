@@ -32,6 +32,7 @@
 - **Discovers / 自动发现** — every supported tool's sessions on your machine automatically · 一键扫描本机所有支持工具的会话文件
 - **Normalizes / 统一归一化** — one clean conversation model (user inputs vs. assistant outputs, tool calls, thinking blocks), even when the format is dirty, half-broken, or a community fork's flavor · 统一成干净的对话模型，输入输出一目了然；脏数据、半截行、魔改格式都能容错解析，绝不丢数据
 - **Edit freely / 自由编辑** — modify any turn, delete, insert, reorder, clone, merge, find & replace, redact secrets · 改任意一轮提问或回答、删除、插入、排序、克隆、合并、查找替换、敏感信息一键脱敏
+- **Organize by project / 按项目组织** — collapsible project groups, project-level delete, batch select & batch delete (with system recycle bin) · 项目分组可折叠、项目级删除、批量勾选与批量删除（默认进系统回收站）
 - **Injects back / 注入回去** — write a session as a brand-new native session file so the original tool can resume it, or migrate a Claude Code session into Codex · 写成原工具能识别的全新会话文件续聊，还能跨工具迁移（Claude Code → Codex）
 - **Never touches originals / 绝不动原始文件** — atomic writes, automatic backups, one-click rollback · 原子写入、自动备份、一键回滚
 

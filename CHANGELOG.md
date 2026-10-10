@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-10-08
+
+### Added
+- **Project grouping in the session list**: sessions are grouped by project
+  directory under collapsible headers (📁 name · N sessions · M turns);
+  collapse state persists across restarts. Toggle "🗂 按项目分组" switches
+  back to the flat list; search results always stay flat
+- **Project-level delete**: right-click a group header → "删除该项目"
+  removes every session (all tools) and every snapshot file of that project,
+  via the shared confirm → recycle-bin flow
+- **Batch mode**: "☑ 批量" (or the toolbar toggle) adds checkboxes to cards
+  and tri-state checkboxes to group headers, with a floating action bar
+  (select all / invert / delete / exit, Esc to exit). Batch delete covers
+  each session's snapshot files and offers the system recycle bin
+- `SessionIndex.remove_sessions_bulk(pairs)` and
+  `SessionIndex.project_files(tool, project_dir)` core APIs with tests
+
+### Performance
+- **List rebuild is ~20× faster** (18s → ~0.9s for 170+ items): the theme
+  name and group-collapse state were re-read from the Windows registry via
+  QSettings on every card — both are now cached in memory with
+  write-through on change
+
+## [0.8.1] - 2026-10-08
+
+### Fixed
+- Inject wizard: target-tool list uses card styling with a theme-consistent
+  selection highlight (was invisible white-on-light)
+
 ## [0.8.0] - 2026-10-07
 
 ### Added

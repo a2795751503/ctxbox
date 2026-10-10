@@ -143,13 +143,23 @@ SPACING_CARD = 8
 
 
 # ---------------------------------------------------------------- 持久化 --
+# QSettings.value 在 Windows 上是注册表读取 (~10ms/次), 列表重建会调用数百次,
+# 必须内存缓存; set_theme 时写穿。
+_theme_cache: str | None = None
+
+
 def current_theme() -> str:
-    name = str(QSettings("ctxbox", "ctxbox").value("theme", DEFAULT_THEME))
-    return name if name in THEMES else DEFAULT_THEME
+    global _theme_cache
+    if _theme_cache is None:
+        name = str(QSettings("ctxbox", "ctxbox").value("theme", DEFAULT_THEME))
+        _theme_cache = name if name in THEMES else DEFAULT_THEME
+    return _theme_cache
 
 
 def set_theme(name: str) -> None:
+    global _theme_cache
     QSettings("ctxbox", "ctxbox").setValue("theme", name)
+    _theme_cache = name if name in THEMES else DEFAULT_THEME
 
 
 def tokens(theme: str | None = None) -> dict[str, str]:
