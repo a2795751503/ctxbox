@@ -1,3 +1,3 @@
 """ctxbox — local-first manager for all your AI assistant contexts."""
 
-__version__ = "0.9.1"
+__version__ = "0.10.0"

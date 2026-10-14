@@ -206,6 +206,7 @@ class MainWindow(QMainWindow):
 
         title = QLabel("会话")
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
+        self.page_title = title
         hb.addWidget(title)
 
         self.search_edit = QLineEdit()
@@ -246,6 +247,7 @@ class MainWindow(QMainWindow):
         self.nav = NavRail()
         self.nav.filterChanged.connect(self._on_nav_filter)
         self.nav.settingsRequested.connect(self._on_settings)
+        self.nav.providersRequested.connect(self._show_providers)
         self.nav.rescanRequested.connect(lambda tool: self.start_scan(tool))
         body.addWidget(self.nav)
 
@@ -310,7 +312,11 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
         splitter.setSizes([430, 650])
-        body.addWidget(splitter, 1)
+        # 页面栈: 0=会话三栏, 1=供应商配置中心 (懒加载)
+        self.page_stack = QStackedWidget()
+        self.page_stack.addWidget(splitter)
+        self.providers_page = None
+        body.addWidget(self.page_stack, 1)
         root.addLayout(body, 1)
         self.setCentralWidget(central)
 
@@ -536,7 +542,27 @@ class MainWindow(QMainWindow):
             self.btn_batch.setChecked(enabled)
 
     # ------------------------------------------------------------- 导航栏 --
+    # ------------------------------------------------------- 供应商配置中心 --
+    def _show_providers(self) -> None:
+        if self.providers_page is None:
+            from .widgets.providers_page import ProvidersPage
+
+            self.providers_page = ProvidersPage()
+            self.providers_page.statusMessage.connect(
+                lambda m: self.statusBar().showMessage(m, 8000)
+            )
+            self.page_stack.addWidget(self.providers_page)
+        else:
+            self.providers_page.reload()
+        self.page_stack.setCurrentWidget(self.providers_page)
+        self.page_title.setText("供应商配置中心")
+
+    def _show_sessions(self) -> None:
+        self.page_stack.setCurrentIndex(0)
+        self.page_title.setText("会话")
+
     def _on_nav_filter(self, tool: str | None) -> None:
+        self._show_sessions()
         self.current_tool_filter = tool
         if self._searching:
             return

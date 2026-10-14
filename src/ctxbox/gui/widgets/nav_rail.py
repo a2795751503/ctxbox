@@ -93,6 +93,7 @@ class NavRail(QWidget):
 
     filterChanged = Signal(object)  # source_tool (str) 或 None = 全部
     settingsRequested = Signal()
+    providersRequested = Signal()
     rescanRequested = Signal(object)  # source_tool (str); None = 全部
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -109,6 +110,12 @@ class NavRail(QWidget):
         self.listw.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.listw.customContextMenuRequested.connect(self._on_context_menu)
         lay.addWidget(self.listw, 1)
+
+        btn_providers = QPushButton("🔌 供应商")
+        btn_providers.setProperty("kind", "secondary")
+        btn_providers.setToolTip("供应商/中转站配置中心: 预设管理 + 一键切换")
+        btn_providers.clicked.connect(self.providersRequested.emit)
+        lay.addWidget(btn_providers)
 
         btn_settings = QPushButton("⚙️ 设置")
         btn_settings.setProperty("kind", "secondary")

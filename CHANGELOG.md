@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-10-08
+
+### Added
+- **供应商配置中心 (CC Switch 风格)**: 左栏新增「🔌 供应商」页 —
+  Claude Code 与 Codex 的供应商/中转站预设管理 (新建/编辑/删除),
+  顶部实时显示当前生效配置 (Base URL / 模型 / 脱敏 Key / 配置文件路径),
+  预设卡片一键「⚡ 启用」写入真实配置
+- `core/providers.py`: `PresetStore` (providers.json 原子落盘),
+  `apply_preset` 写前自动备份且其余配置项 100% 保留
+  (Claude 的 env 其余键、Codex 的 MCP/plugins/marketplaces/旧 provider
+  均通过真机数据全量等价验证), 自研最小 TOML 序列化器
+  (特殊字符段名自动加引号), `active_preset_id` 显示「使用中」徽章
+
+### Fixed
+- `atomic_write` 在 Microsoft Store Python 下的 AppData 虚拟化环境
+  会抛 WinError 17 (临时文件实际落在 D:\WpSystem 卷) — 增加
+  复制+删除回退, 该环境下所有写操作恢复可用
+
 ## [0.9.1] - 2026-10-08
 
 ### Fixed

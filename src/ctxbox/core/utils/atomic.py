@@ -51,6 +51,17 @@ def atomic_write(path: Path, data: bytes) -> None:
                 last_exc = exc
                 if attempt < _REPLACE_RETRIES - 1:
                     time.sleep(_REPLACE_DELAY)
+            except OSError as exc:
+                if getattr(exc, "winerror", None) == 17:
+                    # Microsoft Store Python 的 AppData 虚拟化: tmp 实际落在
+                    # D:\WpSystem\Packages\..., 与目标路径卷不同, MoveFileEx
+                    # 拒绝跨卷替换 (WinError 17)。退化为复制+删除,
+                    # 牺牲原子性保证该环境下功能可用。
+                    shutil.copy2(tmp, path)
+                    with contextlib.suppress(OSError):
+                        os.unlink(tmp)
+                    return
+                raise
         raise FileLockedError(
             f"文件被占用, 无法写入: {path}\n"
             "可能对应的 AI 工具(Codex/Claude 等)正开着这个会话, "
