@@ -212,6 +212,26 @@ class ProvidersPage(QWidget):
         )
         lay.addWidget(self.current_panel)
 
+        # 快捷操作行: 存为预设 / 导出 / 导入
+        quick = QHBoxLayout()
+        btn_snapshot = QPushButton("💾 从当前配置存为预设")
+        btn_snapshot.setProperty("kind", "secondary")
+        btn_snapshot.setToolTip("把上面显示的真实配置直接保存成一个预设, 免手填")
+        btn_snapshot.clicked.connect(self._save_current_as_preset)
+        quick.addWidget(btn_snapshot)
+        btn_export = QPushButton("📤 导出预设")
+        btn_export.setProperty("kind", "secondary")
+        btn_export.setToolTip("把当前工具的预设导出为 JSON, 可分享给别人")
+        btn_export.clicked.connect(self._export_presets)
+        quick.addWidget(btn_export)
+        btn_import = QPushButton("📥 导入预设")
+        btn_import.setProperty("kind", "secondary")
+        btn_import.setToolTip("从 JSON 文件导入预设 (id 冲突自动换新, 不覆盖已有)")
+        btn_import.clicked.connect(self._import_presets)
+        quick.addWidget(btn_import)
+        quick.addStretch(1)
+        lay.addLayout(quick)
+
         # 预设卡片列表 (滚动区)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -312,3 +332,46 @@ class ProvidersPage(QWidget):
             return
         self.reload()
         self.statusMessage.emit(f"已切换到「{preset.name}」 · 配置已备份 · {path}")
+
+    # ------------------------------------------------- 存为预设/导入导出 --
+    def _save_current_as_preset(self) -> None:
+        preset = providers.preset_from_current(self.tool)
+        dlg = PresetEditorDialog(self.tool, preset=preset, parent=self)
+        dlg.setWindowTitle("从当前配置存为预设")
+        if dlg.exec():
+            self.store.upsert(dlg.preset)
+            self.reload()
+            self.statusMessage.emit(f"已把当前配置保存为预设「{dlg.preset.name}」")
+
+    def _export_presets(self) -> None:
+        from pathlib import Path
+
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出预设", f"ctxbox-presets-{self.tool}.json", "JSON (*.json)"
+        )
+        if not path:
+            return
+        try:
+            n = providers.export_presets(Path(path), self.store, self.tool)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "导出失败", str(exc))
+            return
+        self.statusMessage.emit(f"已导出 {n} 个预设到 {path}")
+
+    def _import_presets(self) -> None:
+        from pathlib import Path
+
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(self, "导入预设", "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            n = providers.import_presets(Path(path), self.store)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "导入失败", str(exc))
+            return
+        self.reload()
+        self.statusMessage.emit(f"已导入 {n} 个预设 (id 冲突已自动换新)")

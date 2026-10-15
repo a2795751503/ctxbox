@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-10-08
+
+### Added
+- **MCP 服务器管理 (CC Switch 风格)**: 左栏新增「🧩 MCP」页 —
+  Claude Code (~/.claude.json mcpServers) 与 Codex (config.toml
+  mcp_servers) 的服务器列表 / 新建 / 编辑 / 删除; 编辑器支持
+  逐行参数、KEY=VALUE 环境变量、Codex 启动超时; 写前自动备份,
+  真机数据沙盒验证「新增→删除后与原配置 100% 语义等价」
+- **从当前配置存为预设**: 供应商页一键把真实生效配置转成预设, 免手填
+- **预设导入导出**: JSON 文件分享预设; 导入时 id 冲突自动换新,
+  绝不覆盖已有预设
+
 ## [0.10.0] - 2026-10-08
 
 ### Added

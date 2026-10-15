@@ -267,3 +267,49 @@ def active_preset_id(tool: str, store: PresetStore | None = None) -> str | None:
             if tool == "claude-code" and (not p.model or p.model == current.get("model")):
                 return p.id
     return None
+
+
+# ------------------------------------------------------------ 存为预设/导入导出 --
+def preset_from_current(tool: str) -> ProviderPreset:
+    """把工具当前生效的配置读成一个新预设 (不落盘, 由调用方确认后保存)。"""
+    cur = read_current(tool)
+    return ProviderPreset(
+        tool=tool,
+        name="",
+        base_url=cur.get("base_url", ""),
+        api_key=cur.get("api_key", ""),
+        model=cur.get("model", ""),
+        wire_api=cur.get("wire_api") or "responses",
+        notes="从当前配置导入",
+    )
+
+
+def export_presets(path: Path, store: PresetStore, tool: str | None = None) -> int:
+    """导出预设为 JSON 文件, 返回条数。tool=None 导出全部。"""
+    presets = store.list(tool)
+    payload = {"app": "ctxbox", "version": 1, "presets": [asdict(p) for p in presets]}
+    atomic_write(path, json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+    return len(presets)
+
+
+def import_presets(path: Path, store: PresetStore) -> int:
+    """从 JSON 文件导入预设, id 冲突时换新 id (不覆盖已有预设)。返回导入条数。"""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    items = data.get("presets") if isinstance(data, dict) else data
+    if not isinstance(items, list):
+        raise ValueError("文件里没有 presets 列表")
+    existing = {p.id for p in store.list()}
+    count = 0
+    for item in items:
+        try:
+            preset = ProviderPreset(**item)
+        except TypeError:
+            continue
+        if preset.tool not in TOOLS:
+            continue
+        if preset.id in existing:
+            preset.id = uuid.uuid4().hex[:12]
+        store.upsert(preset)
+        existing.add(preset.id)
+        count += 1
+    return count

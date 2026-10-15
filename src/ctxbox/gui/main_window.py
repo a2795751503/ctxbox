@@ -248,6 +248,7 @@ class MainWindow(QMainWindow):
         self.nav.filterChanged.connect(self._on_nav_filter)
         self.nav.settingsRequested.connect(self._on_settings)
         self.nav.providersRequested.connect(self._show_providers)
+        self.nav.mcpRequested.connect(self._show_mcp)
         self.nav.rescanRequested.connect(lambda tool: self.start_scan(tool))
         body.addWidget(self.nav)
 
@@ -316,6 +317,7 @@ class MainWindow(QMainWindow):
         self.page_stack = QStackedWidget()
         self.page_stack.addWidget(splitter)
         self.providers_page = None
+        self.mcp_page = None
         body.addWidget(self.page_stack, 1)
         root.addLayout(body, 1)
         self.setCentralWidget(central)
@@ -556,6 +558,18 @@ class MainWindow(QMainWindow):
             self.providers_page.reload()
         self.page_stack.setCurrentWidget(self.providers_page)
         self.page_title.setText("供应商配置中心")
+
+    def _show_mcp(self) -> None:
+        if self.mcp_page is None:
+            from .widgets.mcp_page import McpPage
+
+            self.mcp_page = McpPage()
+            self.mcp_page.statusMessage.connect(lambda m: self.statusBar().showMessage(m, 8000))
+            self.page_stack.addWidget(self.mcp_page)
+        else:
+            self.mcp_page.reload()
+        self.page_stack.setCurrentWidget(self.mcp_page)
+        self.page_title.setText("MCP 服务器管理")
 
     def _show_sessions(self) -> None:
         self.page_stack.setCurrentIndex(0)
